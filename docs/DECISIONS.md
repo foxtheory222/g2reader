@@ -33,6 +33,19 @@ Stephen owns every entry here. Agents do not implement ahead of a recorded decis
 6. Resume behavior after relaunch/WebView migration: library vs reader
    (S2-05 deferred pending real-device semantics).
 
+## 2026-07-20 — PDF strategy (Stephen, closes open item 2)
+Stephen directed: study the existing G2 PDF/document apps on GitHub and follow
+the ecosystem consensus. Findings (reference clones + code read): every
+open G2 reader (epub-reader-g2, Glance, aozora-reader, G2-md-browser,
+even-docs, official Teleprompt PDF import, official EH-InNovel) converts the
+document to plain text phone-side and feeds a shared text pagination pipeline;
+none renders document pages as images on the glasses. The one PDF-specific app
+(refact0r/nutshell) extracts via a cloud AI API — mechanism forbidden by our
+offline invariant; its File-API import path is still valid precedent.
+DECIDED: PDF = phone-side pdfjs-dist text extraction feeding the same reader
+pipeline as TXT, with honest refusal for unsupported classes (scanned/no-text).
+No page-image reading mode. Cloud/AI extraction is out.
+
 ## Glasses input semantics — walking skeleton (interim, per kickoff; Stephen may revise)
 - **Implemented interim under kickoff defaults, awaiting Stephen.** This records
   the current slice behavior without closing open reading-UX item 3.
