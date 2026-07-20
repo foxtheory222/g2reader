@@ -30,3 +30,13 @@ Stephen owns every entry here. Agents do not implement ahead of a recorded decis
 - Tap / scroll-down: next page. Swipe up / scroll-up: previous page.
 - Double-tap: exit reader (host-confirmed exit only; never shutdown from
   normal reading input).
+
+## 2026-07-20 — Slice 1 library and bundled book (from implementation brief)
+- Boot into a glasses-side library containing one bundled title: "Alice's
+  Adventures in Wonderland (Ch. 1-2)". A tap opens it at its persisted page;
+  double-tap uses the host exit confirmation.
+- Use one event-capturing text container as the single library row. A native
+  list is deferred until the library has multiple selectable books.
+- Bundle `books/alice-ch1-2.txt` into the Vite output with a `?raw` import.
+- Store page index and page count in browser-local storage under a per-book key;
+  the companion mirror continues to show the current page and page count.

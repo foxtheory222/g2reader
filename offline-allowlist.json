@@ -1,0 +1,15 @@
+{
+  "urlEntries": [],
+  "networkApiTokens": [
+    {
+      "token": "fetch(",
+      "count": 1,
+      "comment": "Vite's modulepreload polyfill fetches only hrefs from bundled same-origin modulepreload link elements; G2 Reader and the Even Hub SDK add no fetch call."
+    },
+    {
+      "token": "EventSource",
+      "count": 1,
+      "comment": "This is the Even Hub SDK's protobuf field-name string for input eventSource, not construction or use of the browser EventSource network API."
+    }
+  ]
+}

@@ -38,3 +38,29 @@ Append-only. Reusable learnings, golden paths, gotchas. Newest at bottom.
 - **Mac python3 needs `pip install --break-system-packages pillow`** (PEP 668).
 - **Even docs:** https://hub.evenrealities.com/docs/getting-started/overview,
   templates repo `even-realities/evenhub-templates`.
+
+## 2026-07-20 — Slice 1 walking skeleton
+
+- **Input routing golden path:** keep wire decoding pure. Only an existing
+  `sysEvent` defaults an omitted `eventType` to `CLICK_EVENT` (0). A bare
+  `textEvent` remains unknown; its serialized scroll values are 1/2. Check
+  double-click (3) in both envelopes before normal navigation.
+- **One-book library:** a single event-capturing `TextContainerProperty` row
+  avoids native list scrolling and list-only rebuilds. Revisit
+  `ListContainerProperty` when multiple books make selection state real.
+- **Durable position:** save `{ pageIndex, pageCount }` synchronously in
+  `localStorage` under `g2reader:position:<bookId>`, then clamp the saved index
+  against the freshly paginated page count on restore. SDK 0.0.12's installed
+  type surface does not export the background-state helper functions described
+  by the background-state skill, so this slice does not call unavailable APIs.
+- **Offline test ordering:** npm's `pretest` runs a fresh production build;
+  `vitest run` then rejects non-empty permissions, any manifest whitelist,
+  missing `dist/`, and unreviewed HTTP(S) literals in built files.
+- **Simulator automation harness:** wait for `/api/ping`, then for the app's
+  `G2_READER_READY` console marker before clearing logs. Clear `/api/console`
+  between actions so an earlier page marker cannot satisfy a later wait.
+  Simulator proof remains layout/logic proof only.
+- **CLI gotcha:** with simulator 0.8.0 installed locally, invoking
+  `npx evenhub-simulator --help` hung without output in this sandbox and had to
+  be terminated. Do not use that as a readiness probe; use the documented
+  automation API instead.

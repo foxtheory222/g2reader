@@ -9,6 +9,7 @@ import { measureTextWrap } from '@evenrealities/pretext'
 // Line height is a fixed 27px in EvenHub's LVGL build.
 
 const LINE_HEIGHT = 27
+export const TEXT_UPGRADE_CHARACTER_LIMIT = 2_000
 
 export interface PaginateBox {
   width: number
@@ -17,7 +18,7 @@ export interface PaginateBox {
 
 export function paginate(source: string, box: PaginateBox): string[] {
   const maxLines = Math.max(1, Math.floor(box.height / LINE_HEIGHT))
-  const paragraphs = source.split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
+  const paragraphs = source.split(/\r?\n(?:[ \t]*\r?\n)+/).map(p => p.trim()).filter(Boolean)
 
   const pages: string[] = []
   let buffer: string[] = []
@@ -57,20 +58,47 @@ export function paginate(source: string, box: PaginateBox): string[] {
 }
 
 function splitParagraph(text: string, width: number, maxLines: number): string[] {
-  const tokens = text.split(/(\s+)/)
   const chunks: string[] = []
-  let current = ''
+  let remaining = text.trim()
 
-  for (const token of tokens) {
-    const candidate = current + token
-    const { lineCount } = measureTextWrap(candidate, width)
-    if (lineCount > maxLines && current.trim()) {
-      chunks.push(current.trim())
-      current = token.replace(/^\s+/, '')
-    } else {
-      current = candidate
+  while (remaining) {
+    const points = Array.from(remaining)
+    let low = 1
+    let high = points.length
+    let largestFit = 0
+
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2)
+      const candidate = points.slice(0, middle).join('')
+      const fitsBudget = candidate.length <= TEXT_UPGRADE_CHARACTER_LIMIT
+      const fitsLines = fitsBudget && measureTextWrap(candidate, width).lineCount <= maxLines
+      if (fitsLines) {
+        largestFit = middle
+        low = middle + 1
+      } else {
+        high = middle - 1
+      }
     }
+
+    if (largestFit === 0) {
+      // A single Unicode code point should always fit the SDK character
+      // budget. Preserve it rather than splitting a surrogate pair.
+      largestFit = 1
+    }
+
+    let cut = largestFit
+    if (largestFit < points.length) {
+      for (let index = largestFit - 1; index > 0; index--) {
+        if (/\s/u.test(points[index])) {
+          cut = index
+          break
+        }
+      }
+    }
+
+    const chunk = points.slice(0, cut).join('').trim()
+    if (chunk) chunks.push(chunk)
+    remaining = points.slice(cut).join('').trimStart()
   }
-  if (current.trim()) chunks.push(current.trim())
   return chunks
 }

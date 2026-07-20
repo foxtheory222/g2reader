@@ -4,5 +4,18 @@
       "source": { "source": "github", "repo": "even-realities/everything-evenhub" }
     }
   },
-  "enabledPlugins": { "everything-evenhub@everything-evenhub": true }
+  "enabledPlugins": { "everything-evenhub@everything-evenhub": true },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/guard.mjs"
+          }
+        ]
+      }
+    ]
+  }
 }
