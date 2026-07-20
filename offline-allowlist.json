@@ -2,9 +2,9 @@
   "urlEntries": [],
   "networkApiTokens": [
     {
-      "token": "fetch(",
-      "count": 1,
-      "comment": "Vite's modulepreload polyfill fetches only hrefs from bundled same-origin modulepreload link elements; G2 Reader and the Even Hub SDK add no fetch call."
+      "token": "fetch",
+      "count": 2,
+      "comment": "One identifier is Vite's modulepreload polyfill call, limited to hrefs from bundled same-origin modulepreload links. The other is the plain word 'fetch' inside the bundled offline Alice book text, not executable code; G2 Reader and the Even Hub SDK add no fetch call."
     },
     {
       "token": "EventSource",

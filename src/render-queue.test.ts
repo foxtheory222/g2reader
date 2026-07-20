@@ -21,7 +21,7 @@ describe('render queue', () => {
     const queue = createRenderQueue({ writeBody, writeFooter, onCommit: (page: number) => committed.push(page) })
 
     await expect(queue.render({ body: 'one', footer: '1 / 2', state: 1 })).rejects.toThrow('bridge lost')
-    await expect(queue.render({ body: 'two', footer: '2 / 2', state: 2 })).resolves.toBeUndefined()
+    await expect(queue.render({ body: 'two', footer: '2 / 2', state: 2 })).resolves.toBe('committed')
 
     expect(committed).toEqual([2])
     expect(writeFooter).toHaveBeenCalledTimes(1)
@@ -46,9 +46,10 @@ describe('render queue', () => {
     expect(committed).toEqual([])
   })
 
-  it('times out a stuck bridge operation and continues with the next job', async () => {
+  it('times out a slow bridge operation and continues after that operation settles', async () => {
+    const slowBody = deferred<boolean>()
     const writeBody = vi.fn()
-      .mockImplementationOnce(() => new Promise<boolean>(() => undefined))
+      .mockImplementationOnce(() => slowBody.promise)
       .mockResolvedValueOnce(true)
     const queue = createRenderQueue({
       writeBody,
@@ -57,8 +58,111 @@ describe('render queue', () => {
       timeoutMs: 20,
     })
 
-    await expect(queue.render({ body: 'stuck', footer: '1', state: 1 })).rejects.toThrow(/timed out/i)
-    await expect(queue.render({ body: 'recovered', footer: '2', state: 2 })).resolves.toBeUndefined()
+    const slow = queue.render({ body: 'slow', footer: '1', state: 1 })
+    await expect(slow).rejects.toThrow(/timed out/i)
+    const recovered = queue.render({ body: 'recovered', footer: '2', state: 2 })
+    slowBody.resolve(true)
+    await expect(recovered).resolves.toBe('committed')
+  })
+
+  it('does not begin a newer write until a timed-out underlying write actually settles', async () => {
+    const staleBody = deferred<boolean>()
+    const events: string[] = []
+    const writeBody = vi.fn(async (content: string) => {
+      events.push(`body:${content}`)
+      if (content === 'stale') {
+        const result = await staleBody.promise
+        events.push('stale-settled')
+        return result
+      }
+      return true
+    })
+    const queue = createRenderQueue({
+      writeBody,
+      writeFooter: async content => {
+        events.push(`footer:${content}`)
+        return true
+      },
+      onCommit: (page: number) => events.push(`commit:${page}`),
+      timeoutMs: 20,
+    })
+
+    const stale = queue.render({ body: 'stale', footer: '1', state: 1 })
+    const newer = queue.render({ body: 'newer', footer: '2', state: 2 })
+    await expect(stale).rejects.toThrow(/timed out/i)
+    expect(events).toEqual(['body:stale'])
+
+    staleBody.resolve(true)
+    await expect(newer).resolves.toBe('committed')
+    expect(events).toEqual([
+      'body:stale',
+      'stale-settled',
+      'body:newer',
+      'footer:2',
+      'commit:2',
+    ])
+  })
+
+  it('keeps only the latest pending render and resolves the replaced request as superseded', async () => {
+    const firstBody = deferred<boolean>()
+    const writes: string[] = []
+    const queue = createRenderQueue({
+      writeBody: async content => {
+        writes.push(`body:${content}`)
+        return content === 'first' ? firstBody.promise : true
+      },
+      writeFooter: async content => {
+        writes.push(`footer:${content}`)
+        return true
+      },
+      onCommit: (page: number) => writes.push(`commit:${page}`),
+    })
+
+    const first = queue.render({ body: 'first', footer: '1', state: 1 })
+    const replaced = queue.render({ body: 'replaced', footer: '2', state: 2 })
+    const latest = queue.render({ body: 'latest', footer: '3', state: 3 })
+
+    await expect(replaced).resolves.toBe('superseded')
+    firstBody.resolve(true)
+    await expect(first).resolves.toBe('committed')
+    await expect(latest).resolves.toBe('committed')
+    expect(writes).toEqual([
+      'body:first',
+      'footer:1',
+      'commit:1',
+      'body:latest',
+      'footer:3',
+      'commit:3',
+    ])
+  })
+
+  it('drops a pending render when shutdown is requested and runs shutdown after the in-flight render', async () => {
+    const firstBody = deferred<boolean>()
+    const events: string[] = []
+    const queue = createRenderQueue({
+      writeBody: async content => {
+        events.push(`body:${content}`)
+        return content === 'first' ? firstBody.promise : true
+      },
+      writeFooter: async content => {
+        events.push(`footer:${content}`)
+        return true
+      },
+      onCommit: (page: number) => events.push(`commit:${page}`),
+    })
+
+    const first = queue.render({ body: 'first', footer: '1', state: 1 })
+    const pending = queue.render({ body: 'pending', footer: '2', state: 2 })
+    const shutdown = queue.requestShutdown(async () => {
+      events.push('shutdown')
+      return true
+    })
+
+    await expect(pending).resolves.toBe('superseded')
+    firstBody.resolve(true)
+    await expect(first).resolves.toBe('committed')
+    await expect(shutdown).resolves.toBeUndefined()
+    expect(events).toEqual(['body:first', 'footer:1', 'commit:1', 'shutdown'])
   })
 
   it('serializes rapid jobs and commits each immutable page state in glasses order', async () => {

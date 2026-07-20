@@ -1,6 +1,14 @@
 import { spawn } from 'node:child_process'
+import { createConnection } from 'node:net'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { inflateSync } from 'node:zlib'
+import {
+  assertRequiredPortsFree,
+  findSeriousConsoleEntries,
+  pixelDifferenceRegion,
+  screenshotsMatchPixels,
+  stopAll,
+  waitForChildReadiness,
+} from './test-sim-lib.mjs'
 
 if (Number(process.versions.node.split('.')[0]) < 20) {
   throw new Error('test:sim requires Node.js 20 or newer')
@@ -9,7 +17,13 @@ if (Number(process.versions.node.split('.')[0]) < 20) {
 const appUrl = 'http://127.0.0.1:4173/'
 const automationUrl = 'http://127.0.0.1:9898'
 const evidenceDir = new URL('../evidence/', import.meta.url)
+const BODY_START_Y = 0
+const BODY_END_Y = 246
+const FOOTER_END_Y = 288
 const children = new Set()
+// No simulator console noise is allowlisted. Additions require a reproduced,
+// narrowly documented simulator-only reason rather than a broad pattern.
+const CONSOLE_ERROR_ALLOWLIST = []
 
 function launch(command, args, label) {
   const child = spawn(command, args, {
@@ -19,6 +33,12 @@ function launch(command, args, label) {
   children.add(child)
   child.stdout.on('data', chunk => process.stdout.write(`[${label}] ${chunk}`))
   child.stderr.on('data', chunk => process.stderr.write(`[${label}] ${chunk}`))
+  child.earlyFailure = new Promise(resolve => {
+    child.once('error', error => resolve(new Error(`${label} failed to spawn: ${error}`)))
+    child.once('exit', (code, signal) => {
+      resolve(new Error(`${label} exited before readiness (code=${code}, signal=${signal})`))
+    })
+  })
   return child
 }
 
@@ -39,18 +59,33 @@ async function waitFor(check, description, timeoutMs = 30_000) {
   throw new Error(`Timed out waiting for ${description}${lastError ? `: ${lastError}` : ''}`)
 }
 
+async function waitForChild(child, check, description, timeoutMs = 30_000) {
+  return waitForChildReadiness(waitFor(check, description, timeoutMs), child.earlyFailure)
+}
+
 async function get(path) {
   const response = await fetch(`${automationUrl}${path}`, { signal: AbortSignal.timeout(2_000) })
   if (!response.ok) throw new Error(`${path} returned ${response.status}`)
   return response
 }
 
-async function waitForConsole(text) {
-  return waitFor(async () => {
-    const body = await (await get('/api/console')).json()
-    const entry = body.entries?.find(entry => String(entry.message).includes(text))
+async function consoleEntries() {
+  const body = await (await get('/api/console')).json()
+  return Array.isArray(body.entries) ? body.entries : []
+}
+
+async function waitForConsole(text, child) {
+  return waitForChild(child, async () => {
+    const entry = (await consoleEntries()).find(entry => String(entry.message).includes(text))
     return entry ? String(entry.message) : false
   }, `console entry containing ${JSON.stringify(text)}`)
+}
+
+async function assertConsoleHealthy(context) {
+  const failures = findSeriousConsoleEntries(await consoleEntries(), CONSOLE_ERROR_ALLOWLIST)
+  if (failures.length) {
+    throw new Error(`${context} emitted serious console entries: ${JSON.stringify(failures)}`)
+  }
 }
 
 async function clearConsole() {
@@ -73,8 +108,18 @@ async function inject(action) {
   if (!body.ok) throw new Error(`input ${action} was not accepted`)
 }
 
+async function performAction(child, action, expectedLog) {
+  await clearConsole()
+  await inject(action)
+  const message = await waitForConsole(expectedLog, child)
+  await assertConsoleHealthy(`input ${action}`)
+  return message
+}
+
 async function screenshot(name) {
   const bytes = Buffer.from(await (await get('/api/screenshot/glasses')).arrayBuffer())
+  // Decoding validates the 576x288 RGBA contract even for a one-off capture.
+  pixelDifferenceRegion(bytes, bytes, BODY_START_Y, FOOTER_END_Y)
   await writeFile(new URL(name, evidenceDir), bytes)
   return bytes
 }
@@ -84,7 +129,7 @@ async function screenshotUntilStable(name, timeoutMs = 5_000) {
   let previous
   while (Date.now() < deadline) {
     const current = Buffer.from(await (await get('/api/screenshot/glasses')).arrayBuffer())
-    if (previous?.equals(current)) {
+    if (previous && screenshotsMatchPixels(previous, current)) {
       await writeFile(new URL(name, evidenceDir), current)
       return current
     }
@@ -92,71 +137,6 @@ async function screenshotUntilStable(name, timeoutMs = 5_000) {
     await delay(200)
   }
   throw new Error(`Timed out waiting for stable screenshot ${JSON.stringify(name)}`)
-}
-
-function rgbaPixels(png) {
-  const signature = '89504e470d0a1a0a'
-  if (png.subarray(0, 8).toString('hex') !== signature) throw new Error('Screenshot is not a PNG')
-  let offset = 8
-  let width = 0
-  let height = 0
-  const idat = []
-  while (offset < png.length) {
-    const length = png.readUInt32BE(offset)
-    const type = png.subarray(offset + 4, offset + 8).toString('ascii')
-    const data = png.subarray(offset + 8, offset + 8 + length)
-    offset += length + 12
-    if (type === 'IHDR') {
-      width = data.readUInt32BE(0)
-      height = data.readUInt32BE(4)
-      if (data[8] !== 8 || data[9] !== 6 || data[12] !== 0) {
-        throw new Error('Expected a non-interlaced 8-bit RGBA simulator screenshot')
-      }
-    }
-    if (type === 'IDAT') idat.push(data)
-    if (type === 'IEND') break
-  }
-
-  const packed = inflateSync(Buffer.concat(idat))
-  const stride = width * 4
-  const pixels = Buffer.alloc(stride * height)
-  let source = 0
-  for (let y = 0; y < height; y++) {
-    const filter = packed[source++]
-    const row = pixels.subarray(y * stride, (y + 1) * stride)
-    const previous = y ? pixels.subarray((y - 1) * stride, y * stride) : undefined
-    for (let x = 0; x < stride; x++) {
-      const raw = packed[source++]
-      const left = x >= 4 ? row[x - 4] : 0
-      const up = previous?.[x] ?? 0
-      const upperLeft = previous && x >= 4 ? previous[x - 4] : 0
-      if (filter === 0) row[x] = raw
-      else if (filter === 1) row[x] = raw + left
-      else if (filter === 2) row[x] = raw + up
-      else if (filter === 3) row[x] = raw + Math.floor((left + up) / 2)
-      else if (filter === 4) {
-        const estimate = left + up - upperLeft
-        const pa = Math.abs(estimate - left)
-        const pb = Math.abs(estimate - up)
-        const pc = Math.abs(estimate - upperLeft)
-        row[x] = raw + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upperLeft)
-      } else throw new Error(`Unsupported PNG filter ${filter}`)
-    }
-  }
-  return { width, height, pixels }
-}
-
-function pixelDifference(leftPng, rightPng) {
-  const left = rgbaPixels(leftPng)
-  const right = rgbaPixels(rightPng)
-  if (left.width !== right.width || left.height !== right.height) {
-    throw new Error('Screenshot dimensions changed unexpectedly')
-  }
-  let changed = 0
-  for (let index = 0; index < left.pixels.length; index += 4) {
-    if (!left.pixels.subarray(index, index + 4).equals(right.pixels.subarray(index, index + 4))) changed++
-  }
-  return changed
 }
 
 async function stop(child) {
@@ -187,28 +167,57 @@ async function stop(child) {
   children.delete(child)
 }
 
-async function assertNoStaleSimulator() {
-  try {
-    const response = await fetch(`${automationUrl}/api/ping`, {
-      signal: AbortSignal.timeout(1_000),
-    })
-    throw new Error(
-      `Refusing to start: a simulator automation API is already answering at ${automationUrl}/api/ping ` +
-        `(status ${response.status}). Stop the stale simulator and retry.`,
+let cleanupPromise
+function cleanupAll() {
+  cleanupPromise ??= stopAll([...children].map(child => () => stop(child)))
+  return cleanupPromise
+}
+
+for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, () => {
+    cleanupAll().then(
+      () => process.exit(exitCode),
+      error => {
+        console.error(error)
+        process.exit(1)
+      },
     )
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Refusing to start:')) throw error
+  })
+}
+
+function portIsOpen(host, port) {
+  return new Promise(resolve => {
+    const socket = createConnection({ host, port })
+    const finish = result => {
+      socket.destroy()
+      resolve(result)
+    }
+    socket.setTimeout(750, () => finish(false))
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+  })
+}
+
+async function assertPortFree(port, label) {
+  if (await portIsOpen('127.0.0.1', port)) {
+    throw new Error(`Refusing to start: ${label} port ${port} is already in use`)
   }
 }
 
 async function launchSimulator() {
+  await assertPortFree(9898, 'simulator automation')
   const simulator = launch(
     'node_modules/.bin/evenhub-simulator',
     [appUrl, '--automation-port', '9898'],
     'simulator',
   )
-  await waitFor(async () => (await (await get('/api/ping')).text()) === 'pong', 'simulator API')
-  const readyMessage = await waitForConsole('G2_READER_READY screen=library page=')
+  await waitForChild(
+    simulator,
+    async () => (await (await get('/api/ping')).text()) === 'pong',
+    'simulator API',
+  )
+  const readyMessage = await waitForConsole('G2_READER_READY screen=library page=', simulator)
+  await assertConsoleHealthy('application readiness')
   const match = readyMessage.match(/page=(\d+)\/(\d+)/)
   if (!match) throw new Error(`Could not parse persisted page from ready log: ${readyMessage}`)
   return {
@@ -221,63 +230,73 @@ async function launchSimulator() {
 let preview
 let simulator
 try {
-  await assertNoStaleSimulator()
+  await assertRequiredPortsFree(port => portIsOpen('127.0.0.1', port))
   await mkdir(evidenceDir, { recursive: true })
   preview = launch(
     'node_modules/.bin/vite',
     ['preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort'],
     'preview',
   )
-  await waitFor(async () => (await fetch(appUrl, { signal: AbortSignal.timeout(2_000) })).ok, 'Vite preview')
+  await waitForChild(
+    preview,
+    async () => (await fetch(appUrl, { signal: AbortSignal.timeout(2_000) })).ok,
+    'Vite preview',
+  )
 
   const initialLaunch = await launchSimulator()
   simulator = initialLaunch.child
-  await screenshot('01-library.png')
-  await clearConsole()
+  const library = await screenshotUntilStable('01-library.png')
 
-  await inject('click')
-  await waitForConsole(`G2_READER_STATE screen=reader page=${initialLaunch.page}/`)
+  await performAction(simulator, 'click', `G2_READER_STATE screen=reader page=${initialLaunch.page}/`)
+  const openedReader = await screenshotUntilStable('01b-opened-reader.png')
+  const libraryToReaderBody = pixelDifferenceRegion(library, openedReader, BODY_START_Y, BODY_END_Y)
+  if (libraryToReaderBody === 0) throw new Error('Opening the book did not change the reader body region')
+
   for (let page = initialLaunch.page; page > 1; page--) {
-    await clearConsole()
-    await inject('up')
-    await waitForConsole(`G2_READER_STATE screen=reader page=${page - 1}/`)
+    await performAction(simulator, 'up', `G2_READER_STATE screen=reader page=${page - 1}/`)
   }
   const page1 = await screenshotUntilStable('02-reader-page-1.png')
-  await clearConsole()
 
-  await inject('click')
-  await waitForConsole('G2_READER_STATE screen=reader page=2/')
+  await performAction(simulator, 'click', 'G2_READER_STATE screen=reader page=2/')
   const page2 = await screenshotUntilStable('03-reader-page-2.png')
-  const nextDiff = pixelDifference(page1, page2)
-  if (nextDiff === 0) throw new Error('Click did not change any rendered pixels between pages 1 and 2')
-  await clearConsole()
+  const nextBodyDiff = pixelDifferenceRegion(page1, page2, BODY_START_Y, BODY_END_Y)
+  const nextFooterDiff = pixelDifferenceRegion(page1, page2, BODY_END_Y, FOOTER_END_Y)
+  if (nextBodyDiff === 0) throw new Error('Page 1 to 2 did not change the body region')
+  if (nextFooterDiff === 0) throw new Error('Page 1 to 2 did not change the footer region')
 
-  await inject('up')
-  await waitForConsole('G2_READER_STATE screen=reader page=1/')
+  await performAction(simulator, 'up', 'G2_READER_STATE screen=reader page=1/')
   const returnedPage1 = await screenshotUntilStable('04-reader-page-1-after-up.png')
-  if (pixelDifference(page1, returnedPage1) !== 0) throw new Error('Scroll-up did not restore page 1 pixels')
+  if (pixelDifferenceRegion(page1, returnedPage1, BODY_START_Y, BODY_END_Y) !== 0) {
+    throw new Error('Scroll-up did not restore page 1 body pixels')
+  }
+  if (pixelDifferenceRegion(page1, returnedPage1, BODY_END_Y, FOOTER_END_Y) !== 0) {
+    throw new Error('Scroll-up did not restore page 1 footer pixels')
+  }
 
   // Move to a non-default page before relaunch so persistence cannot pass by
   // merely falling back to page 1.
-  await clearConsole()
-  await inject('click')
-  await waitForConsole('G2_READER_STATE screen=reader page=2/')
+  await performAction(simulator, 'click', 'G2_READER_STATE screen=reader page=2/')
 
   await stop(simulator)
+  simulator = undefined
   const relaunch = await launchSimulator()
   simulator = relaunch.child
   if (relaunch.page !== 2) {
     throw new Error(`Relaunch restored page ${relaunch.page}, expected persisted non-default page 2`)
   }
-  await clearConsole()
-  await inject('click')
-  await waitForConsole('G2_READER_STATE screen=reader page=2/')
+  await performAction(simulator, 'click', 'G2_READER_STATE screen=reader page=2/')
   const restoredPage2 = await screenshotUntilStable('05-restored-page-2.png')
-  if (pixelDifference(page2, restoredPage2) !== 0) throw new Error('Relaunch did not restore page 2 pixels')
+  if (pixelDifferenceRegion(page2, restoredPage2, BODY_START_Y, BODY_END_Y) !== 0) {
+    throw new Error('Relaunch did not restore page 2 body pixels')
+  }
+  if (pixelDifferenceRegion(page2, restoredPage2, BODY_END_Y, FOOTER_END_Y) !== 0) {
+    throw new Error('Relaunch did not restore page 2 footer pixels')
+  }
 
-  console.log(`SIM_PROOF_OK changed_pixels=${nextDiff}`)
+  console.log(
+    `SIM_PROOF_OK library_body_changed=${libraryToReaderBody} ` +
+    `page_body_changed=${nextBodyDiff} page_footer_changed=${nextFooterDiff}`,
+  )
 } finally {
-  await stop(simulator)
-  await stop(preview)
-  for (const child of children) await stop(child)
+  await cleanupAll()
 }

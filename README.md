@@ -1,49 +1,73 @@
-# text-heavy
+# G2 Reader
 
-Long-form reader demo on G2. Pre-paginates a multi-paragraph string into page-sized chunks, renders one page at a time, and uses `textContainerUpgrade` for flicker-free page turns. Tap advances, swipe goes back, double-tap exits.
+G2 Reader is a fully offline Even Realities G2 walking skeleton for long-form
+text. The packed app contains a one-title library and the bundled first two
+chapters of *Alice's Adventures in Wonderland*. It never requests a network
+permission, backend, telemetry endpoint, or external asset.
 
-## Run
+The glasses open on the library. Tap to open the bundled book at its last
+confirmed page, tap or swipe down to advance, swipe up to go back, and
+double-tap to show the host exit confirmation. Position is written to browser
+local storage only after both body and footer updates succeed. If browser
+storage is denied or full, a non-throwing in-memory fallback keeps the active
+session bootable and coherent.
+
+## Layout and pagination
+
+The G2 canvas is 576×288. The reader uses:
+
+- body: `(0, 0)`, 576×240, 4px padding;
+- gap: `y=240..245`;
+- footer: `(0, 246)`, 576×42, 4px padding.
+
+`src/paginate.ts` measures the body's 568×232 inner box with
+`@evenrealities/pretext` and the G2's fixed 27px line height. Oversized tokens
+are split on Unicode code-point boundaries. Every emitted page fits its line
+budget and the SDK's 2,000-character `textContainerUpgrade` limit.
+
+## Android + G2 device workflow
+
+The default real-device workflow is an Android phone running the Even
+Realities app:
 
 ```bash
 npm install
-npm run dev
+npm run dev -- --host 0.0.0.0
+adb reverse tcp:5173 tcp:5173
+npx evenhub qr --url http://127.0.0.1:5173/
 ```
 
-Then `npm run simulate` (desktop simulator) or `npx evenhub qr --url http://<your-ip>:5173` to test on real glasses.
+Scan the QR code from the Even Realities app and verify on the connected G2.
+Do not assume an iPhone workflow.
 
-## What's in here
+The desktop simulator is useful for bounded layout and logic proof only. It
+cannot establish real-glasses readability, scroll feel, gesture reliability,
+or background/relaunch behavior; those claims require an Android + G2 run.
+
+## Scripts
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start Vite for local development. |
+| `npm run build` | Typecheck production code and create a fresh `dist/`. |
+| `npm run typecheck:test` | Typecheck production and `*.test.ts` files without emitting. |
+| `npm test` | Fresh build, test typecheck, unit tests, and offline distribution gate. |
+| `npm run test:sim` | Run `npm test` first, then the bounded simulator automation proof. |
+| `npm run preview` | Serve the existing `dist/` locally. |
+| `npm run pack` | Run the verified CLI form `evenhub pack app.json dist`. Packaging release gates still apply before handing off an `.ehpk`. |
+
+The simulator harness refuses occupied ports 4173 and 9898, watches child
+process and browser-console failures, and compares the body and footer regions
+independently. It writes proof images under ignored `evidence/`.
+
+## Key files
 
 | File | Purpose |
 |---|---|
-| `src/main.ts` | App entry. Renders `body` + `pager` text containers, wires tap/swipe/double-tap, mirrors current page into the companion WebView. |
-| `src/paginate.ts` | Pixel-accurate pagination via [`@evenrealities/pretext`](https://www.npmjs.com/package/@evenrealities/pretext). Measures each paragraph at the glyph widths LVGL uses on G2, then packs paragraphs into pages that fill the container without clipping. |
-| `src/sample.ts` | Sample content — replace with your own text. |
-| `index.html` | WebView host with zoom-locked viewport. |
-| `app.json` | Manifest. No permissions required. |
-
-## Why this pattern
-
-On G2 you can't scroll. You turn pages. That means:
-
-- **Pre-paginate.** Splitting the whole string up front is cheaper and more predictable than measuring on the glass each time.
-- **Use `textContainerUpgrade`, not `rebuildPageContainer`.** Upgrading in place is flicker-free; rebuilding flashes the full page on every turn.
-- **Keep a page counter.** Readers lose their place on a HUD more easily than on a phone — a tiny `3 / 12` indicator costs nothing.
-- **Serialize bridge writes.** If the user taps fast, overlapping upgrades can race. This template queues through a shared promise chain.
-
-## Resizing the body
-
-Pagination is driven by the container's real pixel box, not a character budget. Change `BODY_W` / `BODY_H` / `BODY_PAD` at the top of `src/main.ts` and `paginate()` re-splits to fit — no separate tuning constant to keep in sync.
-
-LVGL's line height on G2 is fixed at 27px, so the body's inner height divided by 27 gives you the lines-per-page ceiling. `measureTextWrap(text, innerWidth)` from `@evenrealities/pretext` returns the exact wrapped line count at the firmware's glyph widths (Latin, Cyrillic, Greek, CJK, emoji), so pages fill consistently across mixed-script content.
-
-Per-container text hard limits still apply:
-- `textContainerUpgrade` — 2000 chars max
-- `rebuildPageContainer` — 1000 chars max per container
-
-## G2 specifics
-
-- Display: 576x288. This template reserves 576x240 for body and 576x30 for the pager strip.
-- **Tap** (`CLICK_EVENT`) → next page.
-- **Swipe up** (`SCROLL_TOP_EVENT`) → previous page. Swipe down (`SCROLL_BOTTOM_EVENT`) also advances, matching typical scroll expectations.
-- **Double-tap** (`DOUBLE_CLICK_EVENT`) → `shutDownPageContainer(1)` → system exit confirmation.
-- If the user exits mid-read, you probably want to persist `currentPage` via `bridge.setLocalStorage` and restore on next launch. Left out of the template for clarity — wire it in when you ship.
+| `src/main.ts` | Startup, desired/rendered reader state, lifecycle handling, and companion mirror. |
+| `src/render-queue.ts` | Recovering serialized body/footer/shutdown bridge queue with persist-on-confirm commits. |
+| `src/paginate.ts` | Pixel-measured, Unicode-safe, SDK-budgeted pagination. |
+| `src/position-store.ts` | Non-throwing local persistence with in-memory fallback. |
+| `books/alice-ch1-2.txt` | Bundled offline library content. |
+| `src/offline-gate.test.ts` | Manifest, network-literal, and network-API census gate over fresh `dist/`. |
+| `offline-allowlist.json` | Reviewed exact URL prefixes and exact built-token populations. |

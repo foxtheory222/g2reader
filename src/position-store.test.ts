@@ -102,6 +102,29 @@ describe('position store', () => {
     expect(store.restore('alice', 12)).toBe(4)
   })
 
+  it('keeps a newer session save authoritative when durable storage retains an older page', () => {
+    const storage = new StorageStub()
+    storage.setItem('g2reader:position:alice', JSON.stringify({ pageIndex: 2, pageCount: 10 }))
+    const store = createPositionStore(storage)
+    expect(store.restore('alice', 10)).toBe(2)
+
+    storage.setItem = () => { throw new DOMException('full', 'QuotaExceededError') }
+    store.save('alice', 5, 10)
+
+    expect(store.restore('alice', 10)).toBe(5)
+    expect(createPositionStore(storage).restore('alice', 10)).toBe(2)
+  })
+
+  it('seeds the authoritative session copy from a successful durable restore', () => {
+    const storage = new StorageStub()
+    storage.setItem('g2reader:position:alice', JSON.stringify({ pageIndex: 2, pageCount: 10 }))
+    const store = createPositionStore(storage)
+
+    expect(store.restore('alice', 10)).toBe(2)
+    storage.setItem('g2reader:position:alice', JSON.stringify({ pageIndex: 7, pageCount: 10 }))
+    expect(store.restore('alice', 10)).toBe(2)
+  })
+
   it.each([
     [Number.NaN, 10],
     [Number.POSITIVE_INFINITY, 10],

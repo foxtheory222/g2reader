@@ -202,6 +202,9 @@ const pager = new TextContainerProperty({
   isEventCapture: 0,
 })
 
+// SDK 0.0.12's required call order places general event listeners after the
+// one-shot startup container succeeds. Subscribing before this await would
+// violate that contract, so failed startup deliberately installs no router.
 unsubscribe = await initializeStartup({
   create: () => bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({ containerTotalNum: 2, textObject: [body, pager] }),

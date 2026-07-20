@@ -1,6 +1,14 @@
 import { deflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { decodeRgbaPng, pixelDifferenceRegion, screenshotsMatchPixels } from '../scripts/test-sim-lib.mjs'
+import {
+  assertRequiredPortsFree,
+  decodeRgbaPng,
+  findSeriousConsoleEntries,
+  pixelDifferenceRegion,
+  screenshotsMatchPixels,
+  stopAll,
+  waitForChildReadiness,
+} from '../scripts/test-sim-lib.mjs'
 
 function chunk(type: string, data: Buffer) {
   const result = Buffer.alloc(12 + data.length)
@@ -55,5 +63,42 @@ describe('simulator screenshot proof', () => {
     expect(pixelDifferenceRegion(baselinePng, bodyPng, 246, 288)).toBe(0)
     expect(pixelDifferenceRegion(baselinePng, footerPng, 0, 246)).toBe(0)
     expect(pixelDifferenceRegion(baselinePng, footerPng, 246, 288)).toBe(1)
+  })
+})
+
+describe('simulator harness safety', () => {
+  it('flags error-level, uncaught, and unhandled-rejection console entries', () => {
+    const entries = [
+      { level: 'error', message: 'bridge failed' },
+      { level: 'info', message: '[uncaught] boom' },
+      { level: 'info', message: '[unhandledrejection] nope' },
+      { level: 'info', message: 'G2_READER_READY' },
+    ]
+    expect(findSeriousConsoleEntries(entries, [])).toEqual(entries.slice(0, 3))
+  })
+
+  it('fails readiness immediately when the child exits first', async () => {
+    const neverReady = new Promise<string>(() => undefined)
+    await expect(waitForChildReadiness(neverReady, Promise.resolve(new Error('preview exited'))))
+      .rejects.toThrow('preview exited')
+  })
+
+  it('checks both required ports and reports either occupied port', async () => {
+    const checked: number[] = []
+    await expect(assertRequiredPortsFree(async port => {
+      checked.push(port)
+      return port === 4173
+    })).rejects.toThrow('4173')
+    expect(checked.sort()).toEqual([4173, 9898])
+  })
+
+  it('settles every child stop and aggregates cleanup failures', async () => {
+    const stopped: number[] = []
+    const cleanup = stopAll([
+      async () => { stopped.push(1); throw new Error('first failed') },
+      async () => { stopped.push(2) },
+    ])
+    await expect(cleanup).rejects.toBeInstanceOf(AggregateError)
+    expect(stopped).toEqual([1, 2])
   })
 })

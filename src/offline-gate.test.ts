@@ -15,7 +15,7 @@ interface OfflineAllowlist {
 }
 
 const NETWORK_API_TOKENS = [
-  'fetch(',
+  'fetch',
   'XMLHttpRequest',
   'WebSocket',
   'EventSource',
@@ -47,6 +47,11 @@ function readAllowlist(): OfflineAllowlist {
 }
 
 describe('offline distribution gate', () => {
+  it('censuses bare network API references with identifier boundaries', () => {
+    const fixture = 'const request = globalThis.fetch; const prefetch = "not the API"'
+    expect(countNetworkToken(fixture, 'fetch')).toBe(1)
+  })
+
   it('keeps app permissions empty and defines no whitelist', () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, 'app.json'), 'utf8')) as {
       permissions?: unknown

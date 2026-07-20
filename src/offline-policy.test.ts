@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { countNetworkToken, findNetworkLiterals, isReviewedUrl } from './offline-policy'
+import {
+  countNetworkToken,
+  findNetworkLiterals,
+  findProtocolRelativeLiterals,
+  isReviewedUrl,
+} from './offline-policy'
 
 const reviewed = [{ literal: 'https://api.good.example/v1', comment: 'test fixture' }]
 
@@ -33,8 +38,28 @@ describe('offline URL policy', () => {
     ])
   })
 
+  it('finds unquoted and IPv6 protocol-relative authorities without treating code syntax as URLs', () => {
+    const source = [
+      '<img src=//evil.example/x>',
+      '<a href=//[2001:db8::1]/x>',
+      'asset //space-boundary.example/x',
+      'const marker = 1; //evil.example/this-is-a-js-comment',
+      'const local = "http://localhost"',
+      'const divided = a=b//2',
+    ].join('\n')
+
+    const literals = findProtocolRelativeLiterals(source)
+    expect(literals).toContain('//evil.example/x')
+    expect(literals).toContain('//[2001:db8::1]/x')
+    expect(literals).toContain('//space-boundary.example/x')
+    expect(literals).not.toContain('//evil.example/this-is-a-js-comment')
+    expect(findProtocolRelativeLiterals('//evil.example/a comment')).toEqual([])
+    expect(findProtocolRelativeLiterals('http://localhost')).toEqual([])
+    expect(findProtocolRelativeLiterals('const divided = a=b//2')).toEqual([])
+  })
+
   it('counts every occurrence of a reviewed network API token', () => {
-    expect(countNetworkToken('fetch(a);fetch(b); "fetch("', 'fetch(')).toBe(3)
+    expect(countNetworkToken('fetch(a);fetch(b); "fetch"; prefetch', 'fetch')).toBe(3)
     expect(countNetworkToken('new WebSocket(a); WebSocket', 'WebSocket')).toBe(2)
   })
 })

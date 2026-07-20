@@ -3,6 +3,37 @@ import { inflateSync } from 'node:zlib'
 const EXPECTED_WIDTH = 576
 const EXPECTED_HEIGHT = 288
 
+export function findSeriousConsoleEntries(entries, allowlist) {
+  return entries.filter(entry => {
+    const level = String(entry.level ?? entry.type ?? '').toLowerCase()
+    const message = String(entry.message ?? '')
+    const serious = level === 'error' || /\[(?:uncaught|unhandledrejection)\]/i.test(message)
+    return serious && !allowlist.some(pattern => pattern.test(message))
+  })
+}
+
+export function waitForChildReadiness(readiness, earlyFailure) {
+  return Promise.race([
+    readiness,
+    earlyFailure.then(error => { throw error }),
+  ])
+}
+
+export async function assertRequiredPortsFree(isOpen) {
+  const ports = [9898, 4173]
+  const results = await Promise.all(ports.map(async port => ({ port, open: await isOpen(port) })))
+  const occupied = results.find(result => result.open)
+  if (occupied) throw new Error(`Required harness port ${occupied.port} is already in use`)
+}
+
+export async function stopAll(stoppers) {
+  const results = await Promise.allSettled(stoppers.map(stop => Promise.resolve().then(stop)))
+  const failures = results
+    .filter(result => result.status === 'rejected')
+    .map(result => result.reason)
+  if (failures.length) throw new AggregateError(failures, 'One or more simulator process groups failed to stop')
+}
+
 export function decodeRgbaPng(png) {
   const signature = '89504e470d0a1a0a'
   if (png.subarray(0, 8).toString('hex') !== signature) throw new Error('Screenshot is not a PNG')

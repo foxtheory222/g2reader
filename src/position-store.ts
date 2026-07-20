@@ -52,7 +52,7 @@ function parsePosition(raw: string | null): StoredPosition | null {
 
 export function createPositionStore(storage?: Storage | null): PositionStore {
   const durable = storage === undefined ? browserStorage() : storage
-  const fallback = new Map<string, string>()
+  const session = new Map<string, StoredPosition>()
 
   return {
     save(bookId, pageIndex, pageCount) {
@@ -63,7 +63,7 @@ export function createPositionStore(storage?: Storage | null): PositionStore {
       }
       const key = keyFor(bookId)
       const serialized = JSON.stringify(value)
-      fallback.set(key, serialized)
+      session.set(key, value)
       try {
         durable?.setItem(key, serialized)
       } catch {
@@ -76,13 +76,17 @@ export function createPositionStore(storage?: Storage | null): PositionStore {
       const normalizedCount = normalizeBoundary(currentPageCount)
       if (normalizedCount === 0) return 0
       const key = keyFor(bookId)
+      const sessionValue = session.get(key)
+      if (sessionValue) return clampPage(sessionValue.pageIndex, normalizedCount)
+
       let raw: string | null = null
       try {
         raw = durable?.getItem(key) ?? null
       } catch {
         raw = null
       }
-      const value = parsePosition(raw) ?? parsePosition(fallback.get(key) ?? null)
+      const value = parsePosition(raw)
+      if (value) session.set(key, value)
       return value ? clampPage(value.pageIndex, normalizedCount) : 0
     },
   }
