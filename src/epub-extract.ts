@@ -61,7 +61,7 @@ interface InflationState {
   budgets: EpubBudgets
 }
 
-export const MAX_EPUB_CHARACTERS = 2_000_000
+export const MAX_EPUB_CHARACTERS = 4_000_000
 export const DEFAULT_EPUB_BUDGETS: Readonly<EpubBudgets> = Object.freeze({
   maxEntryCount: 2_000,
   maxEntryUncompressedBytes: 8 * 1024 * 1024,
@@ -74,7 +74,7 @@ const DRM_REASON = 'This EPUB is DRM-protected and cannot be read.'
 const FIXED_LAYOUT_REASON = 'This fixed-layout EPUB is unsupported; this reader requires reflowable text.'
 const EMPTY_REASON = 'This EPUB does not contain readable text.'
 const GARBAGE_REASON = 'This EPUB text is mostly unreadable because its character encoding is unsupported.'
-const CHARACTER_LIMIT_REASON = 'This EPUB exceeds the 2,000,000 characters extraction limit.'
+const CHARACTER_LIMIT_REASON = 'This EPUB exceeds the 4,000,000 characters extraction limit.'
 const XML_DECLARATION_REASON = 'This EPUB contains unsupported XML DTD or entity declarations.'
 const EPUB_MIMETYPE = 'application/epub+zip'
 const STORE_COMPRESSION_MAGIC = '\u0000\u0000'

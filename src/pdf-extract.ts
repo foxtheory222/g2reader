@@ -65,9 +65,11 @@ const GARBAGE_REASON = 'This PDF text is mostly unreadable because its character
 const ENCRYPTED_REASON = 'This PDF is encrypted. Remove its password and try again.'
 const RTL_REASON = 'This PDF uses RTL text direction, which is unvalidated and unsupported in this reader.'
 const ROTATED_REASON = 'This PDF uses predominantly rotated/vertical text, which is unvalidated and unsupported in this reader.'
-export const MAX_PDF_PAGES = 1_000
-export const MAX_EXTRACTED_CHARACTERS = 2_000_000
+export const MAX_PDF_PAGES = 3_000
+export const MAX_EXTRACTED_CHARACTERS = 4_000_000
 export const FURNITURE_EDGE_BAND_RATIO = 0.15
+
+const CHARACTER_LIMIT_REASON = 'This PDF exceeds the 4,000,000 characters extraction limit.'
 
 function emptyMeta(pageCount = 0, pageCharOffsets: number[] = []): PdfExtractionMeta {
   return {
@@ -366,7 +368,7 @@ export async function extractPdfText(
     if (documentProxy.numPages > MAX_PDF_PAGES) {
       return {
         status: 'unsupported',
-        reason: 'This PDF exceeds the 1,000 pages extraction limit.',
+        reason: 'This PDF exceeds the 3,000 pages extraction limit.',
         meta: emptyMeta(documentProxy.numPages),
       }
     }
@@ -390,7 +392,7 @@ export async function extractPdfText(
           if (cumulativeRawCharacters > MAX_EXTRACTED_CHARACTERS) {
             return {
               status: 'unsupported',
-              reason: 'This PDF exceeds the 2,000,000 characters extraction limit.',
+              reason: CHARACTER_LIMIT_REASON,
               meta: { ...emptyMeta(documentProxy.numPages), pageErrorCount },
             }
           }
@@ -422,7 +424,7 @@ export async function extractPdfText(
     if (finalCharacterCount > MAX_EXTRACTED_CHARACTERS) {
       return {
         status: 'unsupported',
-        reason: 'This PDF exceeds the 2,000,000 characters extraction limit.',
+        reason: CHARACTER_LIMIT_REASON,
         meta: {
           pageCount: documentProxy.numPages,
           charCount: 0,

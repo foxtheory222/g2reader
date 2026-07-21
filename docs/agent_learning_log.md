@@ -250,3 +250,22 @@ Append-only. Reusable learnings, golden paths, gotchas. Newest at bottom.
   generator and byte-compare a full temporary regeneration in tests. A hostile
   forged-size fixture can be produced deterministically by patching only the
   target central-directory uncompressed-size field after generation.
+
+## 2026-07-20 — Slice 5 novel-scale pagination
+
+- **Use generated numbered prose for scale proof:** build the ~2.7M-character
+  input inside Vitest so no large fixture enters the package. Log character
+  count, density, page count, and elapsed milliseconds; keep a 30-second
+  per-pagination assertion to tolerate slow CI while retaining useful timing.
+- **Stage density changes for the active book only:** one novel-scale paginate
+  measured about 1.8 seconds on this workspace, so eagerly rebuilding five
+  cached novels would approach nine seconds. Publish a fresh cache containing
+  only the active book after the structural render succeeds. Other books then
+  paginate lazily, and the position record's old density/page count remaps
+  relative progress on reopen.
+- **Large-import memory check:** the import result, in-memory store, companion
+  list, and routed list share the same `Book` object/string. Selected-file
+  buffers, decoder/hash bytes, extractor chapter/page intermediates, and list
+  wrapper arrays are temporary; only the store text and page-cache strings are
+  intentionally retained. Assert store/result object identity at 2.7M chars to
+  guard against a second retained book record.

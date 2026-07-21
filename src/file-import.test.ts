@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { TestDomParser } from '../tests/support/dom-parser'
 import { createBookStore } from './book-store'
 import { extractEpubText } from './epub-extract'
-import { importBookFile } from './file-import'
+import { MAX_EPUB_BYTES, MAX_PDF_BYTES, MAX_TXT_BYTES, importBookFile } from './file-import'
 import { paginate } from './paginate'
 
 const originalDomParser = globalThis.DOMParser
@@ -38,6 +38,12 @@ async function fixtureFile(name: string) {
 }
 
 describe('phone file import', () => {
+  it('pins the TXT, PDF, and EPUB binary import limits', () => {
+    expect(MAX_TXT_BYTES).toBe(8 * 1024 * 1024)
+    expect(MAX_PDF_BYTES).toBe(25 * 1024 * 1024)
+    expect(MAX_EPUB_BYTES).toBe(25 * 1024 * 1024)
+  })
+
   it('routes TXT through the same imported-book store path', async () => {
     const store = createBookStore({ indexedDB: null, clock: () => 17 })
     const extractPdf = vi.fn()
@@ -193,16 +199,66 @@ describe('phone file import', () => {
     const pdfRead = vi.fn()
     const epubRead = vi.fn()
 
-    await expect(importBookFile({ name: 'huge.txt', size: 5 * 1024 * 1024 + 1, arrayBuffer: txtRead }, { store, extractPdf, extractEpub: unusedEpubExtractor }))
-      .resolves.toMatchObject({ status: 'unsupported', reason: expect.stringContaining('5 MB') })
-    await expect(importBookFile({ name: 'huge.pdf', size: 25 * 1024 * 1024 + 1, arrayBuffer: pdfRead }, { store, extractPdf, extractEpub: unusedEpubExtractor }))
+    await expect(importBookFile({ name: 'huge.txt', size: MAX_TXT_BYTES + 1, arrayBuffer: txtRead }, { store, extractPdf, extractEpub: unusedEpubExtractor }))
+      .resolves.toMatchObject({ status: 'unsupported', reason: expect.stringContaining('8 MB') })
+    await expect(importBookFile({ name: 'huge.pdf', size: MAX_PDF_BYTES + 1, arrayBuffer: pdfRead }, { store, extractPdf, extractEpub: unusedEpubExtractor }))
       .resolves.toMatchObject({ status: 'unsupported', reason: expect.stringContaining('25 MB') })
-    await expect(importBookFile({ name: 'huge.epub', size: 25 * 1024 * 1024 + 1, arrayBuffer: epubRead }, { store, extractPdf, extractEpub: unusedEpubExtractor }))
+    await expect(importBookFile({ name: 'huge.epub', size: MAX_EPUB_BYTES + 1, arrayBuffer: epubRead }, { store, extractPdf, extractEpub: unusedEpubExtractor }))
       .resolves.toMatchObject({ status: 'unsupported', reason: expect.stringContaining('25 MB') })
     expect(txtRead).not.toHaveBeenCalled()
     expect(pdfRead).not.toHaveBeenCalled()
     expect(epubRead).not.toHaveBeenCalled()
     expect(extractPdf).not.toHaveBeenCalled()
+  })
+
+  it('accepts TXT, PDF, and EPUB files at their exact binary limits', async () => {
+    const store = createBookStore({ indexedDB: null })
+    const bytes = new TextEncoder().encode('Readable text.')
+    const atLimit = (name: string, size: number) => ({
+      name,
+      size,
+      arrayBuffer: async () => bytes.buffer,
+    })
+    const extractPdf = vi.fn(async () => ({
+      status: 'ready' as const,
+      text: 'Readable PDF text.',
+      meta: {
+        pageCount: 1, charCount: 18, pageCharOffsets: [0], columnsSuspected: false,
+        textPageCount: 1, pageErrorCount: 0, textCoverage: 1,
+      },
+    }))
+    const extractEpub = vi.fn(async () => ({
+      status: 'ready' as const,
+      text: 'Readable EPUB text.',
+      meta: { chapterCount: 1, charCount: 19, chapterOffsets: [0] },
+    }))
+
+    await expect(importBookFile(atLimit('limit.txt', MAX_TXT_BYTES), { store, extractPdf, extractEpub }))
+      .resolves.toMatchObject({ status: 'ready' })
+    await expect(importBookFile(atLimit('limit.pdf', MAX_PDF_BYTES), { store, extractPdf, extractEpub }))
+      .resolves.toMatchObject({ status: 'ready' })
+    await expect(importBookFile(atLimit('limit.epub', MAX_EPUB_BYTES), { store, extractPdf, extractEpub }))
+      .resolves.toMatchObject({ status: 'ready' })
+    expect(extractPdf).toHaveBeenCalledOnce()
+    expect(extractEpub).toHaveBeenCalledOnce()
+  })
+
+  it('imports a 2.7M-character TXT book without retaining a second store record', async () => {
+    const store = createBookStore({ indexedDB: null, clock: () => 21 })
+    const text = 'Numbered sentence 1 has readable classic prose. '.repeat(60_000).slice(0, 2_700_000)
+
+    const result = await importBookFile(pickedFile('full-novel.txt', text), {
+      store,
+      extractPdf: vi.fn(),
+      extractEpub: unusedEpubExtractor,
+    })
+
+    expect(result.status).toBe('ready')
+    if (result.status !== 'ready') return
+    const listed = await store.list()
+    expect(result.book.text).toHaveLength(2_700_000)
+    expect(listed.books).toHaveLength(1)
+    expect(listed.books[0]).toBe(result.book)
   })
 
   it('refuses invalid UTF-8 without replacement decoding', async () => {

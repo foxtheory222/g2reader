@@ -75,8 +75,10 @@ No page-image reading mode. Cloud/AI extraction is out.
   spine order, preserve structured paragraph/chapter boundaries, and feed the
   existing plaintext store and paginator. Package title/author and chapter
   offsets are retained; no EPUB-specific glasses UI is introduced.
-- The PDF slice's 25 MB pre-read and 2,000,000 extracted-character interim
-  limits apply. Invalid ZIP/container/OPF data, DRM or non-font encryption,
+- The PDF slice's 25 MB pre-read and then-current 2,000,000
+  extracted-character interim limits applied here; the character limit is
+  superseded by the Slice 5 audit-safety decision below. Invalid
+  ZIP/container/OPF data, DRM or non-font encryption,
   predominantly pre-paginated fixed layout, empty text, and encoding garbage
   are honestly refused. Font obfuscation alone is not classified as DRM.
 
@@ -104,7 +106,7 @@ No page-image reading mode. Cloud/AI extraction is out.
 
 ## 2026-07-20 — Slice 2 audit safety defaults (interim, awaiting Stephen)
 
-- **Implemented interim under safety defaults, awaiting Stephen.** These values
+- **Historical values, superseded by Slice 5 below.** These values
   do not close any future format/UX decisions: PDF files are limited to 25 MB,
   TXT files to 5 MB, PDFs to 1,000 pages, and cumulative extracted PDF text to
   2,000,000 characters. Limits are checked before file reads where the File API
@@ -122,6 +124,20 @@ No page-image reading mode. Cloud/AI extraction is out.
   elsewhere, unhyphenated, in the same document.
 - Imported-book IDs use SHA-256 of text content. No production records exist,
   so the pre-release FNV identifier has no migration requirement.
+
+## 2026-07-20 — Slice 5 audit safety defaults (supersedes Slice 2 limits)
+
+- **Implemented interim under Stephen's full-length-classics direction.** PDF
+  and EPUB extracted text are limited to 4,000,000 characters, PDFs to 3,000
+  pages, and TXT files to 8 MB. The 25 MB PDF and EPUB binary caps are
+  unchanged. All other strict UTF-8, extraction-integrity, layout, coverage,
+  corruption, decompression, and honest-refusal gates remain unchanged.
+- The PDF character ceiling still applies independently to raw PDF.js item
+  strings and final joined text including inserted page separators.
+- Density changes synchronously repaginate only the active book and discard
+  other page-cache entries. A dropped book lazily paginates when next opened;
+  its stored page count and density remap the saved position by relative
+  progress.
 
 ## 2026-07-20 — File picker shows all files (delegated; device-validated)
 Real-device finding: Android's picker hides transferred `.epub` files when an

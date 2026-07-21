@@ -21,7 +21,7 @@ export type FileImportResult =
 
 export const MAX_PDF_BYTES = 25 * 1024 * 1024
 export const MAX_EPUB_BYTES = 25 * 1024 * 1024
-export const MAX_TXT_BYTES = 5 * 1024 * 1024
+export const MAX_TXT_BYTES = 8 * 1024 * 1024
 
 export async function importBookFile(
   file: PickedFile,
@@ -38,7 +38,7 @@ export async function importBookFile(
         : null
   if (recognizedExtension === 'txt') {
     if (file.size > MAX_TXT_BYTES) {
-      return { status: 'unsupported', reason: 'This TXT file exceeds the 5 MB import limit.' }
+      return { status: 'unsupported', reason: 'This TXT file exceeds the 8 MB import limit.' }
     }
     let data: ArrayBuffer
     try {

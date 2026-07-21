@@ -20,6 +20,10 @@ async function fixture(name: string): Promise<ArrayBuffer> {
 }
 
 describe('EPUB text extraction', () => {
+  it('pins the EPUB extracted-character limit', () => {
+    expect(MAX_EPUB_CHARACTERS).toBe(4_000_000)
+  })
+
   it('reads metadata and spine chapters in order with paragraph and chapter offsets', async () => {
     const result = await extractEpubText(await fixture('valid-two-chapters.epub'), 'download.epub')
 
@@ -195,7 +199,26 @@ describe('EPUB text extraction', () => {
     expect(result.meta.title).toBe('fallback_name')
   })
 
-  it('stops cumulative expansion beyond the interim 2,000,000-character ceiling', async () => {
+  it('accepts exactly 4,000,000 extracted EPUB characters', async () => {
+    const zip = await JSZip.loadAsync(await fixture('valid-two-chapters.epub'))
+    const prefix = 'Numbered sentence 1 carries readable classic prose. '
+      .repeat(Math.ceil(MAX_EPUB_CHARACTERS / 51))
+      .slice(0, MAX_EPUB_CHARACTERS - 1)
+    const prose = `${prefix}Z`
+    zip.file('OEBPS/text/chapter-1.xhtml', `<html><body><p>${prose}</p></body></html>`)
+    zip.remove('OEBPS/text/chapter-2.xhtml')
+    const opf = await zip.file('OEBPS/content.opf')!.async('string')
+    zip.file('OEBPS/content.opf', opf.replace('<itemref idref="chapter-2"/>', ''))
+    const data = await zip.generateAsync({ type: 'arraybuffer' })
+
+    const result = await extractEpubText(data, 'classic.epub')
+
+    expect(prose).toHaveLength(MAX_EPUB_CHARACTERS)
+    expect(result.status).toBe('ready')
+    expect(result.status === 'ready' ? result.text.length : 0).toBe(MAX_EPUB_CHARACTERS)
+  })
+
+  it('stops cumulative expansion beyond the interim 4,000,000-character ceiling', async () => {
     const zip = await JSZip.loadAsync(await fixture('valid-two-chapters.epub'))
     zip.file('OEBPS/text/chapter-1.xhtml', `<html><body><p>${'a'.repeat(MAX_EPUB_CHARACTERS + 1)}</p></body></html>`)
     const data = await zip.generateAsync({ type: 'arraybuffer' })
@@ -203,7 +226,7 @@ describe('EPUB text extraction', () => {
     const result = await extractEpubText(data, 'large.epub')
 
     expect(result.status).toBe('unsupported')
-    expect(result.status === 'unsupported' ? result.reason : '').toContain('2,000,000 characters')
+    expect(result.status === 'unsupported' ? result.reason : '').toContain('4,000,000 characters')
   })
 
   it('reuses the existing corruption philosophy for degenerate extracted text', async () => {

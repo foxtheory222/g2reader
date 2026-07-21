@@ -20,6 +20,7 @@ import { extractEpubText } from './epub-extract'
 import { classifyInput } from './input'
 import { libraryBody, libraryFooter, moveLibrarySelection, visibleLibraryBooks } from './library'
 import { createLibraryRefreshCoordinator } from './library-refresh'
+import { stageActiveBookPageCache } from './page-cache'
 import { paginate } from './paginate'
 import { extractPdfText } from './pdf-extract'
 import { createPositionStore, remapPageIndex } from './position-store'
@@ -526,11 +527,10 @@ function changeDensity() {
   const book = bookById(priorDesired.activeBookId)
   const oldPages = pagesFor(book)
   const nextDensity = cycleDensity(density)
-  const stagedPageCache = new Map<string, string[]>()
-  for (const bookId of new Set([...pageCache.keys(), book.id])) {
-    const cachedBook = routedBooks.find(candidate => candidate.id === bookId)
-    if (cachedBook) pagesFor(cachedBook, nextDensity, stagedPageCache)
-  }
+  // A novel-scale paginate is intentionally synchronous and can take around
+  // two seconds. Stage only the active book; other books lazily rebuild on
+  // their next pagesFor call, where stored density preserves progress remap.
+  const stagedPageCache = stageActiveBookPageCache(book, nextDensity, pagesFor)
   const newPages = pagesFor(book, nextDensity, stagedPageCache)
   const target: ReaderState = {
     ...priorDesired,

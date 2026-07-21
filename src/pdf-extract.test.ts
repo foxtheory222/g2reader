@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_EXTRACTED_CHARACTERS,
+  MAX_PDF_PAGES,
   classifyTextCoverage,
   classifyUnsupportedLayout,
   classifyPdfFailure,
@@ -44,6 +46,11 @@ async function fixture(name: string): Promise<ArrayBuffer> {
 }
 
 describe('PDF text extraction', () => {
+  it('pins the PDF page and extracted-character limits', () => {
+    expect(MAX_PDF_PAGES).toBe(3_000)
+    expect(MAX_EXTRACTED_CHARACTERS).toBe(4_000_000)
+  })
+
   it('reconstructs prose, paragraphs, page boundaries, and page offsets', async () => {
     const result = await extractPdfText(await fixture('simple-prose.pdf'))
 
@@ -224,11 +231,18 @@ describe('PDF text extraction', () => {
     expect(hasMostlyGarbageText('A readable passage repeats ordinary words without corrupt encoding. '.repeat(8))).toBe(false)
   })
 
-  it('refuses PDFs over the 1000-page extraction limit before reading pages', async () => {
-    const result = await extractPdfText(new ArrayBuffer(0), {
-      loadDocument: async () => ({ numPages: 1001 }),
+  it('accepts exactly 3,000 PDF pages and refuses one over', async () => {
+    const exactResult = await extractPdfText(new ArrayBuffer(0), {
+      loadDocument: extractionDocument(Array.from({ length: MAX_PDF_PAGES }, (_, index) => ({
+        items: [pdfJsItem(`Readable body text unique to page ${index + 1}.`)],
+      }))),
     })
-    expect(result).toMatchObject({ status: 'unsupported', reason: expect.stringContaining('1,000 pages') })
+    expect(exactResult).toMatchObject({ status: 'ready', meta: { pageCount: MAX_PDF_PAGES } })
+
+    const overResult = await extractPdfText(new ArrayBuffer(0), {
+      loadDocument: async () => ({ numPages: 3_001 }),
+    })
+    expect(overResult).toMatchObject({ status: 'unsupported', reason: expect.stringContaining('3,000 pages') })
   })
 
   it('counts per-page parser errors as missing coverage', async () => {
@@ -255,43 +269,36 @@ describe('PDF text extraction', () => {
     })
   })
 
-  it('stops once cumulative extracted text exceeds two million characters', async () => {
-    const huge = 'a'.repeat(1_000_001)
+  it('accepts exactly 4,000,000 extracted PDF characters', async () => {
+    const prefix = 'A readable numbered sentence carries ordinary classic prose. '
+      .repeat(Math.ceil(MAX_EXTRACTED_CHARACTERS / 60))
+      .slice(0, MAX_EXTRACTED_CHARACTERS - 1)
+    const prose = `${prefix}Z`
     const result = await extractPdfText(new ArrayBuffer(0), {
-      loadDocument: async () => ({
-        numPages: 2,
-        async getPage() {
-          return {
-            getViewport: () => ({ width: 612, height: 792 }),
-            getTextContent: async () => ({
-              items: [{ str: huge, dir: 'ltr', transform: [12, 0, 0, 12, 72, 720], width: 130, height: 12 }],
-            }),
-            cleanup: () => undefined,
-          }
-        },
-        destroy: async () => undefined,
-      }),
+      loadDocument: extractionDocument([{ items: [pdfJsItem(prose)] }]),
     })
-    expect(result).toMatchObject({ status: 'unsupported', reason: expect.stringContaining('2,000,000 characters') })
+    expect(prose).toHaveLength(MAX_EXTRACTED_CHARACTERS)
+    expect(result.status).toBe('ready')
+    expect(result.status === 'ready' ? result.text.length : 0).toBe(MAX_EXTRACTED_CHARACTERS)
   })
 
-  it('budgets raw item strings before whitespace normalization', async () => {
+  it('budgets more than 4M raw item characters before whitespace normalization', async () => {
     const result = await extractPdfText(new ArrayBuffer(0), {
       loadDocument: extractionDocument([{
         // Budget raw string-bearing items before validating/reconstructing the
         // PDF.js text-item shape or collapsing the whitespace.
-        items: [{ str: ' '.repeat(2_000_001) }],
+        items: [{ str: ' '.repeat(MAX_EXTRACTED_CHARACTERS + 1) }],
       }]),
     })
-    expect(result).toMatchObject({ status: 'unsupported', reason: expect.stringContaining('2,000,000 characters') })
+    expect(result).toMatchObject({ status: 'unsupported', reason: expect.stringContaining('4,000,000 characters') })
   })
 
   it('includes inserted page separators in the final text cap', async () => {
-    const page = { items: [pdfJsItem('a'.repeat(1_000_000))] }
+    const page = { items: [pdfJsItem('a'.repeat(2_000_000))] }
     const result = await extractPdfText(new ArrayBuffer(0), {
       loadDocument: extractionDocument([page, page]),
     })
-    expect(result).toMatchObject({ status: 'unsupported', reason: expect.stringContaining('2,000,000 characters') })
+    expect(result).toMatchObject({ status: 'unsupported', reason: expect.stringContaining('4,000,000 characters') })
   })
 
   it('defines exact coverage boundaries and the short-document exemption', () => {
