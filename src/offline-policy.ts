@@ -1,6 +1,7 @@
 export interface ReviewedUrl {
   literal: string
   comment: string
+  prefix?: boolean
 }
 
 const ABSOLUTE_URL_PATTERN = /\b(?:https?|wss?):\/\/[^\s"'`<>)\\]+/gi
@@ -36,14 +37,20 @@ function comparableUrl(literal: string) {
 }
 
 export function isReviewedUrl(literal: string, entries: ReviewedUrl[]): boolean {
+  const exact = entries.some(entry => entry.prefix !== true && entry.literal === literal)
+  if (exact) return true
+
   let candidate: URL
   try {
     candidate = comparableUrl(literal)
   } catch {
+    // Keep non-concrete template strings reviewable without treating them as
+    // an origin/path prefix. Only the exact emitted text is accepted.
     return false
   }
 
   return entries.some(entry => {
+    if (entry.prefix !== true) return false
     let reviewed: URL
     try {
       reviewed = comparableUrl(entry.literal)

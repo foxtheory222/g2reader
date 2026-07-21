@@ -3,6 +3,12 @@ import { inflateSync } from 'node:zlib'
 const EXPECTED_WIDTH = 576
 const EXPECTED_HEIGHT = 288
 
+export function simulatorLaunchUrl(seedBook) {
+  const url = new URL('http://127.0.0.1:4173/')
+  if (seedBook) url.searchParams.set('simSeedBook', '1')
+  return url.href
+}
+
 export function findSeriousConsoleEntries(entries, allowlist) {
   return entries.filter(entry => {
     const level = String(entry.level ?? entry.type ?? '').toLowerCase()

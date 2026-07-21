@@ -5,6 +5,7 @@ import {
   assertRequiredPortsFree,
   findSeriousConsoleEntries,
   pixelDifferenceRegion,
+  simulatorLaunchUrl,
   screenshotsMatchPixels,
   stopAll,
   waitForChildReadiness,
@@ -14,7 +15,7 @@ if (Number(process.versions.node.split('.')[0]) < 20) {
   throw new Error('test:sim requires Node.js 20 or newer')
 }
 
-const appUrl = 'http://127.0.0.1:4173/'
+const initialAppUrl = simulatorLaunchUrl(true)
 const automationUrl = 'http://127.0.0.1:9898'
 const evidenceDir = new URL('../evidence/', import.meta.url)
 const BODY_START_Y = 0
@@ -204,8 +205,9 @@ async function assertPortFree(port, label) {
   }
 }
 
-async function launchSimulator() {
+async function launchSimulator(seedBook) {
   await assertPortFree(9898, 'simulator automation')
+  const appUrl = simulatorLaunchUrl(seedBook)
   const simulator = launch(
     'node_modules/.bin/evenhub-simulator',
     [appUrl, '--automation-port', '9898'],
@@ -216,8 +218,12 @@ async function launchSimulator() {
     async () => (await (await get('/api/ping')).text()) === 'pong',
     'simulator API',
   )
-  const readyMessage = await waitForConsole('G2_READER_READY screen=library page=', simulator)
+  const readyMessage = await waitForConsole('G2_READER_READY screen=library selection=', simulator)
   await assertConsoleHealthy('application readiness')
+  const selectionMatch = readyMessage.match(/selection=(\d+)\/(\d+)/)
+  if (!selectionMatch || Number(selectionMatch[1]) !== 1 || Number(selectionMatch[2]) !== 2) {
+    throw new Error(`Seeded library did not start with the first of exactly two books selected: ${readyMessage}`)
+  }
   const match = readyMessage.match(/page=(\d+)\/(\d+)/)
   if (!match) throw new Error(`Could not parse persisted page from ready log: ${readyMessage}`)
   return {
@@ -234,37 +240,48 @@ try {
   await mkdir(evidenceDir, { recursive: true })
   preview = launch(
     'node_modules/.bin/vite',
-    ['preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort'],
-    'preview',
+    ['--host', '127.0.0.1', '--port', '4173', '--strictPort'],
+    'dev',
   )
   await waitForChild(
     preview,
-    async () => (await fetch(appUrl, { signal: AbortSignal.timeout(2_000) })).ok,
+    async () => (await fetch(initialAppUrl, { signal: AbortSignal.timeout(2_000) })).ok,
     'Vite preview',
   )
 
-  const initialLaunch = await launchSimulator()
+  const initialLaunch = await launchSimulator(true)
   simulator = initialLaunch.child
-  const library = await screenshotUntilStable('01-library.png')
+  const firstSelection = await screenshotUntilStable('01-library-first-selected.png')
 
-  await performAction(simulator, 'click', `G2_READER_STATE screen=reader page=${initialLaunch.page}/`)
+  const selectionMessage = await performAction(simulator, 'down', 'screen=library selection=2/2 book=')
+  const seedId = selectionMessage.match(/book=(book-[0-9a-f]{64})/)?.[1]
+  if (!seedId) throw new Error(`Could not parse deterministic seeded book id: ${selectionMessage}`)
+  const seededSelection = await screenshotUntilStable('01a-library-seed-selected.png')
+  const selectionBodyDiff = pixelDifferenceRegion(firstSelection, seededSelection, BODY_START_Y, BODY_END_Y)
+  if (selectionBodyDiff === 0) throw new Error('Moving the cursor to seeded book 2 did not change the library body')
+
+  const openedMessage = await performAction(simulator, 'click', `screen=reader selection=2/2 book=${seedId} page=`)
+  const openedMatch = openedMessage.match(/page=(\d+)\/(\d+)/)
+  if (!openedMatch || Number(openedMatch[2]) < 2) {
+    throw new Error(`Seeded book did not open with at least two pages: ${openedMessage}`)
+  }
   const openedReader = await screenshotUntilStable('01b-opened-reader.png')
-  const libraryToReaderBody = pixelDifferenceRegion(library, openedReader, BODY_START_Y, BODY_END_Y)
+  const libraryToReaderBody = pixelDifferenceRegion(seededSelection, openedReader, BODY_START_Y, BODY_END_Y)
   if (libraryToReaderBody === 0) throw new Error('Opening the book did not change the reader body region')
 
-  for (let page = initialLaunch.page; page > 1; page--) {
-    await performAction(simulator, 'up', `G2_READER_STATE screen=reader page=${page - 1}/`)
+  for (let page = Number(openedMatch[1]); page > 1; page--) {
+    await performAction(simulator, 'up', `book=${seedId} page=${page - 1}/`)
   }
   const page1 = await screenshotUntilStable('02-reader-page-1.png')
 
-  await performAction(simulator, 'click', 'G2_READER_STATE screen=reader page=2/')
+  await performAction(simulator, 'click', `book=${seedId} page=2/`)
   const page2 = await screenshotUntilStable('03-reader-page-2.png')
   const nextBodyDiff = pixelDifferenceRegion(page1, page2, BODY_START_Y, BODY_END_Y)
   const nextFooterDiff = pixelDifferenceRegion(page1, page2, BODY_END_Y, FOOTER_END_Y)
   if (nextBodyDiff === 0) throw new Error('Page 1 to 2 did not change the body region')
   if (nextFooterDiff === 0) throw new Error('Page 1 to 2 did not change the footer region')
 
-  await performAction(simulator, 'up', 'G2_READER_STATE screen=reader page=1/')
+  await performAction(simulator, 'up', `book=${seedId} page=1/`)
   const returnedPage1 = await screenshotUntilStable('04-reader-page-1-after-up.png')
   if (pixelDifferenceRegion(page1, returnedPage1, BODY_START_Y, BODY_END_Y) !== 0) {
     throw new Error('Scroll-up did not restore page 1 body pixels')
@@ -275,16 +292,20 @@ try {
 
   // Move to a non-default page before relaunch so persistence cannot pass by
   // merely falling back to page 1.
-  await performAction(simulator, 'click', 'G2_READER_STATE screen=reader page=2/')
+  await performAction(simulator, 'click', `book=${seedId} page=2/`)
 
   await stop(simulator)
   simulator = undefined
-  const relaunch = await launchSimulator()
+  // Durability proof: the second process must load the seeded book and page
+  // from IndexedDB. Omitting the seed query prevents DEV startup from
+  // evicting/reimporting the fixture and masking broken durable writes.
+  const relaunch = await launchSimulator(false)
   simulator = relaunch.child
-  if (relaunch.page !== 2) {
-    throw new Error(`Relaunch restored page ${relaunch.page}, expected persisted non-default page 2`)
+  const relaunchedSelection = await performAction(simulator, 'down', `screen=library selection=2/2 book=${seedId}`)
+  if (!relaunchedSelection.includes(`book=${seedId}`)) {
+    throw new Error(`Relaunch did not converge on the same deterministic seeded book: ${relaunchedSelection}`)
   }
-  await performAction(simulator, 'click', 'G2_READER_STATE screen=reader page=2/')
+  await performAction(simulator, 'click', `book=${seedId} page=2/`)
   const restoredPage2 = await screenshotUntilStable('05-restored-page-2.png')
   if (pixelDifferenceRegion(page2, restoredPage2, BODY_START_Y, BODY_END_Y) !== 0) {
     throw new Error('Relaunch did not restore page 2 body pixels')
@@ -295,7 +316,8 @@ try {
 
   console.log(
     `SIM_PROOF_OK library_body_changed=${libraryToReaderBody} ` +
-    `page_body_changed=${nextBodyDiff} page_footer_changed=${nextFooterDiff}`,
+    `selection_body_changed=${selectionBodyDiff} page_body_changed=${nextBodyDiff} ` +
+    `page_footer_changed=${nextFooterDiff} seeded_book=${seedId}`,
   )
 } finally {
   await cleanupAll()

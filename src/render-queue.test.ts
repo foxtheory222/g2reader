@@ -239,4 +239,53 @@ describe('render queue', () => {
     expect(writeFooter).not.toHaveBeenCalled()
     await expect(queue.render({ body: 'later', footer: '2', state: 2 })).rejects.toThrow(/host exit/i)
   })
+
+  it('runs a structural rebuild only after an in-flight render body and footer', async () => {
+    const body = deferred<boolean>()
+    const events: string[] = []
+    const queue = createRenderQueue({
+      writeBody: async () => { events.push('body'); return body.promise },
+      writeFooter: async () => { events.push('footer'); return true },
+      onCommit: () => events.push('render-commit'),
+    })
+
+    const render = queue.render({ body: 'page', footer: '1', state: 1 })
+    const rebuild = queue.structural(async () => { events.push('rebuild'); return true })
+    await Promise.resolve()
+    expect(events).toEqual(['body'])
+
+    body.resolve(true)
+    await Promise.all([render, rebuild])
+    expect(events).toEqual(['body', 'footer', 'render-commit', 'rebuild'])
+  })
+
+  it('never starts structural bridge work after host-confirmed exit', async () => {
+    const rebuild = vi.fn().mockResolvedValue(true)
+    const queue = createRenderQueue({
+      writeBody: async () => true,
+      writeFooter: async () => true,
+      onCommit: () => undefined,
+    })
+    queue.confirmHostExit()
+
+    await expect(queue.structural(rebuild)).rejects.toThrow(/host exit/i)
+    expect(rebuild).not.toHaveBeenCalled()
+  })
+
+  it('suppresses a post-import rebuild when double-tap exit is already pending', async () => {
+    const shutdown = deferred<boolean>()
+    const rebuild = vi.fn().mockResolvedValue(true)
+    const queue = createRenderQueue({
+      writeBody: async () => true,
+      writeFooter: async () => true,
+      onCommit: () => undefined,
+    })
+
+    const firstExit = queue.requestShutdown(() => shutdown.promise)
+    await expect(queue.requestShutdown(async () => true)).rejects.toThrow(/already pending/i)
+    await expect(queue.structural(rebuild)).rejects.toThrow(/exit pending/i)
+    expect(rebuild).not.toHaveBeenCalled()
+    shutdown.resolve(true)
+    await expect(firstExit).resolves.toBeUndefined()
+  })
 })

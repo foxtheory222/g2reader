@@ -5,6 +5,7 @@ import {
   decodeRgbaPng,
   findSeriousConsoleEntries,
   pixelDifferenceRegion,
+  simulatorLaunchUrl,
   screenshotsMatchPixels,
   stopAll,
   waitForChildReadiness,
@@ -67,6 +68,11 @@ describe('simulator screenshot proof', () => {
 })
 
 describe('simulator harness safety', () => {
+  it('seeds only the first launch and uses the unseeded origin for durability relaunch', () => {
+    expect(simulatorLaunchUrl(true)).toBe('http://127.0.0.1:4173/?simSeedBook=1')
+    expect(simulatorLaunchUrl(false)).toBe('http://127.0.0.1:4173/')
+  })
+
   it('flags error-level, uncaught, and unhandled-rejection console entries', () => {
     const entries = [
       { level: 'error', message: 'bridge failed' },

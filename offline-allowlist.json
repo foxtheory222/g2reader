@@ -1,10 +1,136 @@
 {
-  "urlEntries": [],
+  "urlEntries": [
+    {
+      "literal": "https://github.com/zloirock/core-js/blob/v3.49.0/LICENSE",
+      "comment": "Static core-js license metadata emitted once in the PDF.js main bundle and once in its worker; never used as a request target."
+    },
+    {
+      "literal": "https://github.com/zloirock/core-js",
+      "comment": "Static core-js source metadata emitted once in the PDF.js main bundle and once in its worker; never used as a request target."
+    },
+    {
+      "literal": "https://a",
+      "comment": "Static core-js URL/URLSearchParams conformance-test input emitted in both PDF.js bundles; it is passed only to URL constructors."
+    },
+    {
+      "literal": "https://a/c%20d?a=1&c=3",
+      "comment": "Static expected value in the core-js URL conformance test emitted in both PDF.js bundles; it is only compared as text."
+    },
+    {
+      "literal": "https://a@b",
+      "comment": "Static core-js URL parser conformance-test input emitted in both PDF.js bundles; it is passed only to the URL constructor."
+    },
+    {
+      "literal": "https://тест",
+      "comment": "Static core-js internationalized-host parser test emitted in both PDF.js bundles; it is passed only to the URL constructor."
+    },
+    {
+      "literal": "https://a#б",
+      "comment": "Static core-js Unicode-fragment parser test emitted in both PDF.js bundles; it is passed only to the URL constructor."
+    },
+    {
+      "literal": "https://x",
+      "comment": "Static core-js URL parser conformance-test input emitted in both PDF.js bundles; it is passed only to the URL constructor."
+    },
+    {
+      "literal": "http://www.w3.org/2000/svg",
+      "comment": "SVG XML namespace constant emitted once in the PDF.js main bundle and once in its worker; it is not a retrievable resource."
+    },
+    {
+      "literal": "http://${l}",
+      "comment": "Exact minified main-bundle template used to add a default protocol while normalizing a PDF link; it constructs a URL value but performs no request."
+    },
+    {
+      "literal": "http://${e}",
+      "comment": "Exact minified worker-bundle template used to add a default protocol while normalizing a PDF link; it constructs a URL value but performs no request."
+    },
+    {
+      "literal": "http://example.com",
+      "comment": "Static base URL used only to validate and normalize a relative PDF link in the PDF.js main bundle."
+    },
+    {
+      "literal": "https://foo.bar",
+      "comment": "Static fallback base passed to URL parsing twice by PDF.js filename extraction; no request is performed."
+    },
+    {
+      "literal": "http://www.apache.org/licenses/LICENSE-2.0",
+      "comment": "Apache-2.0 license notice in the PDF.js worker header comment; never used at runtime."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xci/",
+      "comment": "XFA configuration XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xfa-connection-set/",
+      "comment": "XFA connection-set XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xfa-data/",
+      "comment": "XFA data XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xfa-form/",
+      "comment": "XFA form XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xfa-locale-set/",
+      "comment": "XFA locale-set XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://ns.adobe.com/xdp/pdf/",
+      "comment": "Adobe XDP PDF XML namespace identifier used for string comparison only."
+    },
+    {
+      "literal": "http://www.w3.org/2000/09/xmldsig#",
+      "comment": "XML signature namespace identifier used for string comparison only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xfa-source-set/",
+      "comment": "XFA source-set XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://www.w3.org/1999/XSL/Transform",
+      "comment": "XSLT XML namespace identifier used for string comparison only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xfa-template/",
+      "comment": "XFA template XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xdc/",
+      "comment": "XFA XDC XML namespace identifier used for string matching only."
+    },
+    {
+      "literal": "http://ns.adobe.com/xdp/",
+      "comment": "Adobe XDP XML namespace identifier used for string comparison only."
+    },
+    {
+      "literal": "http://ns.adobe.com/xfdf/",
+      "comment": "Adobe XFDF XML namespace identifier used for string comparison only."
+    },
+    {
+      "literal": "http://www.w3.org/1999/xhtml",
+      "comment": "XHTML XML namespace identifier used for string comparison only."
+    },
+    {
+      "literal": "http://ns.adobe.com/xmpmeta/",
+      "comment": "Adobe XMP metadata XML namespace identifier used for string comparison only."
+    },
+    {
+      "literal": "http://www.xfa.org/schema/xfa-data/1.0/",
+      "comment": "XFA datasets serialization namespace emitted into XML text; it is not fetched."
+    }
+  ],
   "networkApiTokens": [
     {
       "token": "fetch",
-      "count": 2,
-      "comment": "One identifier is Vite's modulepreload polyfill call, limited to hrefs from bundled same-origin modulepreload links. The other is the plain word 'fetch' inside the bundled offline Alice book text, not executable code; G2 Reader and the Even Hub SDK add no fetch call."
+      "count": 41,
+      "comment": "Exact population: 2 pre-existing occurrences (Vite's same-package modulepreload call and Alice prose); PDF.js main adds 2 unreachable global fetch calls plus 2 member names/calls; its worker adds 1 unreachable global fetch call, 29 internal PDF object-table fetch methods/calls, and 5 diagnostic strings. URL document loading is unreachable because G2 Reader passes only ArrayBuffer data. disableFontFace stops browser font installation; CMap and font-data requests fail at their null base URLs before fetch, and worker fetching is explicitly false."
+    },
+    {
+      "token": "XMLHttpRequest",
+      "count": 4,
+      "comment": "Exact population: PDF.js main has one binary-resource constructor, its DONE constant, and one URL-document network-stream constructor; the worker has one synchronous ICC/WASM constructor. ArrayBuffer-only document loading bypasses the URL stream, absent resource base URLs prevent binary loads, and useWorkerFetch:false disables the worker ICC/WASM path."
     },
     {
       "token": "EventSource",

@@ -9,16 +9,29 @@ import {
 const reviewed = [{ literal: 'https://api.good.example/v1', comment: 'test fixture' }]
 
 describe('offline URL policy', () => {
-  it('matches an exact origin and boundary-delimited reviewed path prefix', () => {
+  it('matches reviewed URL literals exactly by default', () => {
     expect(isReviewedUrl('https://api.good.example/v1', reviewed)).toBe(true)
-    expect(isReviewedUrl('https://api.good.example/v1/books', reviewed)).toBe(true)
-    expect(isReviewedUrl('https://api.good.example/v1?book=1', reviewed)).toBe(true)
+    expect(isReviewedUrl('https://api.good.example/v1/books', reviewed)).toBe(false)
+    expect(isReviewedUrl('https://api.good.example/v1?book=1', reviewed)).toBe(false)
+  })
+
+  it('allows boundary-delimited descendants only for an explicit prefix entry', () => {
+    const prefixes = [{ ...reviewed[0], prefix: true }]
+    expect(isReviewedUrl('https://api.good.example/v1', prefixes)).toBe(true)
+    expect(isReviewedUrl('https://api.good.example/v1/books', prefixes)).toBe(true)
+    expect(isReviewedUrl('https://api.good.example/v10', prefixes)).toBe(false)
   })
 
   it('rejects hostile sibling hosts and path-confusion suffixes', () => {
     expect(isReviewedUrl('https://api.good.example.evil.test/v1', reviewed)).toBe(false)
     expect(isReviewedUrl('https://api.good.example/v10', reviewed)).toBe(false)
     expect(isReviewedUrl('https://api.good.example/v1evil', reviewed)).toBe(false)
+  })
+
+  it('requires exact text for reviewed non-concrete URL templates', () => {
+    const templates = [{ literal: 'http://${host}', comment: 'test fixture' }]
+    expect(isReviewedUrl('http://${host}', templates)).toBe(true)
+    expect(isReviewedUrl('http://${other}', templates)).toBe(false)
   })
 
   it('finds HTTP, websocket, and delimiter-led protocol-relative literals', () => {

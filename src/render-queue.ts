@@ -18,6 +18,10 @@ export interface RenderQueue<State> {
   // Only the latest not-yet-started snapshot is retained. A replaced snapshot
   // resolves as superseded because no bridge write was attempted for it.
   render(job: RenderJob<State>): Promise<RenderOutcome>
+  // Structural changes supersede any render that has not started, then wait
+  // for an in-flight render's body+footer pair to finish before entering the
+  // same host-exit-aware bridge lane.
+  structural(operation: () => Promise<boolean>): Promise<void>
   requestShutdown(shutdown: () => Promise<boolean>): Promise<void>
   confirmHostExit(): void
 }
@@ -33,6 +37,10 @@ interface PendingRender<State> extends Deferred<RenderOutcome> {
 }
 
 interface PendingShutdown extends Deferred<void> {
+  operation: () => Promise<boolean>
+}
+
+interface PendingStructural extends Deferred<void> {
   operation: () => Promise<boolean>
 }
 
@@ -87,6 +95,7 @@ function hostExitError() {
 export function createRenderQueue<State>(options: RenderQueueOptions<State>): RenderQueue<State> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   let pendingRender: PendingRender<State> | undefined
+  const pendingStructural: PendingStructural[] = []
   let pendingShutdown: PendingShutdown | undefined
   let draining = false
   let pendingExit = false
@@ -101,6 +110,7 @@ export function createRenderQueue<State>(options: RenderQueueOptions<State>): Re
     const error = hostExitError()
     pendingRender?.reject(error)
     pendingRender = undefined
+    for (const task of pendingStructural.splice(0)) task.reject(error)
     pendingShutdown?.reject(error)
     pendingShutdown = undefined
   }
@@ -190,12 +200,45 @@ export function createRenderQueue<State>(options: RenderQueueOptions<State>): Re
     task.resolve()
   }
 
+  async function runStructural(task: PendingStructural) {
+    if (hostExited) {
+      task.reject(hostExitError())
+      return
+    }
+
+    const result = await settleOperation(
+      task.operation,
+      'structural bridge operation',
+      timeoutMs,
+      error => task.reject(error),
+    )
+    if (result.status === 'timed-out') return
+    if (result.status === 'rejected') {
+      task.reject(result.reason)
+      return
+    }
+    if (!result.value) {
+      task.reject(new Error('structural bridge operation returned false'))
+      return
+    }
+    if (hostExited) {
+      task.reject(hostExitError())
+      return
+    }
+    task.resolve()
+  }
+
   async function drain() {
     while (!hostExited) {
       if (pendingShutdown) {
         const task = pendingShutdown
         pendingShutdown = undefined
         await runShutdown(task)
+        continue
+      }
+      if (pendingStructural.length) {
+        const task = pendingStructural.shift()!
+        await runStructural(task)
         continue
       }
       if (pendingRender) {
@@ -215,7 +258,7 @@ export function createRenderQueue<State>(options: RenderQueueOptions<State>): Re
     void drain().finally(() => {
       draining = false
       if (hostExited) rejectPendingAfterHostExit()
-      else if (pendingShutdown || pendingRender) scheduleDrain()
+      else if (pendingShutdown || pendingStructural.length || pendingRender) scheduleDrain()
     })
   }
 
@@ -238,11 +281,24 @@ export function createRenderQueue<State>(options: RenderQueueOptions<State>): Re
       return completion.promise
     },
 
+    structural(operation) {
+      if (hostExited) return Promise.reject(hostExitError())
+      if (pendingExit) return Promise.reject(new Error('Structural work suppressed while exit pending'))
+
+      supersedePendingRender()
+      const completion = deferred<void>()
+      pendingStructural.push({ ...completion, operation })
+      scheduleDrain()
+      return completion.promise
+    },
+
     requestShutdown(shutdown) {
       if (hostExited) return Promise.reject(hostExitError())
       if (pendingExit) return Promise.reject(new Error('Shutdown already pending'))
       pendingExit = true
       supersedePendingRender()
+      const exitError = new Error('Structural work suppressed while exit pending')
+      for (const task of pendingStructural.splice(0)) task.reject(exitError)
 
       const completion = deferred<void>()
       pendingShutdown = { ...completion, operation: shutdown }

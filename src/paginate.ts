@@ -26,9 +26,17 @@ export function paginate(source: string, box: PaginateBox): string[] {
 
   const flush = () => {
     if (!buffer.length) return
-    pages.push(buffer.join('\n\n'))
+    emit(buffer.join('\n\n'))
     buffer = []
     bufferLines = 0
+  }
+
+  const emit = (content: string) => {
+    if (content.length <= TEXT_UPGRADE_CHARACTER_LIMIT) {
+      pages.push(content)
+      return
+    }
+    pages.push(...splitParagraph(content, box.width, maxLines))
   }
 
   for (const para of paragraphs) {
@@ -37,7 +45,7 @@ export function paginate(source: string, box: PaginateBox): string[] {
     if (paraLines > maxLines) {
       flush()
       for (const chunk of splitParagraph(para, box.width, maxLines)) {
-        pages.push(chunk)
+        emit(chunk)
       }
       continue
     }

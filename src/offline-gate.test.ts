@@ -22,7 +22,7 @@ const NETWORK_API_TOKENS = [
   'sendBeacon',
   'importScripts',
 ] as const
-const TEXT_EXTENSIONS = new Set(['.css', '.html', '.js', '.json', '.map', '.svg', '.txt'])
+const TEXT_EXTENSIONS = new Set(['.css', '.html', '.js', '.json', '.map', '.mjs', '.svg', '.txt'])
 const ROOT = new URL('..', import.meta.url).pathname
 const DIST = join(ROOT, 'dist')
 
@@ -90,7 +90,7 @@ describe('offline distribution gate', () => {
     expect(existsSync(DIST), 'dist/ is missing; run a fresh npm run build before the offline gate').toBe(true)
     const allowlist = readAllowlist()
     const js = filesBelow(DIST)
-      .filter(file => extname(file) === '.js')
+      .filter(file => extname(file) === '.js' || extname(file) === '.mjs')
       .map(file => readFileSync(file, 'utf8'))
       .join('\n')
 

@@ -65,6 +65,14 @@ describe('paginate', () => {
     }
   })
 
+  it('post-checks every assembled page against the SDK character limit', () => {
+    const shortMeasuring = `visible${'\u200B'.repeat(2_500)}${' '.repeat(2_500)}end`
+    const pages = paginate(`First.\n\n${shortMeasuring}\n\nLast.`, { width: FULL_WIDTH, height: 216 })
+
+    expect(pages.length).toBeGreaterThan(1)
+    for (const page of pages) expect(page.length).toBeLessThanOrEqual(2_000)
+  })
+
   it('recognizes CRLF paragraph endings and preserves the maxLines=1 limit', () => {
     const pages = paginate('first\r\n\r\nsecond', { width: FULL_WIDTH, height: LINE_HEIGHT })
     expect(pages).toEqual(['first', 'second'])
