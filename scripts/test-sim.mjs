@@ -3,6 +3,7 @@ import { createConnection } from 'node:net'
 import { mkdir, writeFile } from 'node:fs/promises'
 import {
   assertRequiredPortsFree,
+  decodeRgbaPng,
   findSeriousConsoleEntries,
   pixelDifferenceRegion,
   simulatorLaunchUrl,
@@ -19,7 +20,8 @@ const initialAppUrl = simulatorLaunchUrl(true)
 const automationUrl = 'http://127.0.0.1:9898'
 const evidenceDir = new URL('../evidence/', import.meta.url)
 const BODY_START_Y = 0
-const BODY_END_Y = 246
+const DEFAULT_BODY_END_Y = 170
+const COMPACT_FOOTER_START_Y = 230
 const FOOTER_END_Y = 288
 const children = new Set()
 // No simulator console noise is allowlisted. Additions require a reproduced,
@@ -140,6 +142,17 @@ async function screenshotUntilStable(name, timeoutMs = 5_000) {
   throw new Error(`Timed out waiting for stable screenshot ${JSON.stringify(name)}`)
 }
 
+function litPixelsInRegion(png, yStart, yEnd) {
+  const { pixels, width } = decodeRgbaPng(png)
+  let lit = 0
+  for (let y = yStart; y < yEnd; y++) {
+    for (let x = 0; x < width; x++) {
+      if (pixels[(y * width + x) * 4 + 3] > 0) lit++
+    }
+  }
+  return lit
+}
+
 async function stop(child) {
   if (!child?.pid) return
 
@@ -218,19 +231,80 @@ async function launchSimulator(seedBook) {
     async () => (await (await get('/api/ping')).text()) === 'pong',
     'simulator API',
   )
-  const readyMessage = await waitForConsole('G2_READER_READY screen=library selection=', simulator)
+  const readyMessage = await waitForConsole('G2_READER_READY screen=', simulator)
   await assertConsoleHealthy('application readiness')
-  const selectionMatch = readyMessage.match(/selection=(\d+)\/(\d+)/)
-  if (!selectionMatch || Number(selectionMatch[1]) !== 1 || Number(selectionMatch[2]) !== 2) {
-    throw new Error(`Seeded library did not start with the first of exactly two books selected: ${readyMessage}`)
+  const match = readyMessage.match(/screen=(library|reader) selection=(\d+)\/(\d+) book=([^ ]+) page=(\d+)\/(\d+) density=(5|6|8) progress=(percent|page|hidden)/)
+  if (!match) throw new Error(`Could not parse ready log: ${readyMessage}`)
+  if (seedBook && Number(match[3]) !== 2) {
+    throw new Error(`Seeded launch did not expose exactly two books: ${readyMessage}`)
   }
-  const match = readyMessage.match(/page=(\d+)\/(\d+)/)
-  if (!match) throw new Error(`Could not parse persisted page from ready log: ${readyMessage}`)
   return {
     child: simulator,
-    page: Number(match[1]),
-    pageCount: Number(match[2]),
+    screen: match[1],
+    selection: Number(match[2]),
+    bookCount: Number(match[3]),
+    bookId: match[4],
+    page: Number(match[5]),
+    pageCount: Number(match[6]),
+    density: Number(match[7]),
+    progress: match[8],
+    message: readyMessage,
   }
+}
+
+async function moveMenuCursor(child, from, to) {
+  let cursor = from
+  while (cursor < to) {
+    cursor++
+    await performAction(child, 'down', `screen=menu`)
+  }
+  while (cursor > to) {
+    cursor--
+    await performAction(child, 'up', `screen=menu`)
+  }
+  return cursor
+}
+
+async function normalizeReader(child, state) {
+  let current = state
+  if (current.screen === 'reader') {
+    await performAction(child, 'click', 'screen=menu')
+    await moveMenuCursor(child, 1, 4)
+    const libraryMessage = await performAction(child, 'click', 'screen=library')
+    const match = libraryMessage.match(/selection=(\d+)\/(\d+) book=([^ ]+)/)
+    if (!match) throw new Error(`Could not parse library state: ${libraryMessage}`)
+    current = { ...current, screen: 'library', selection: Number(match[1]), bookId: match[3] }
+  }
+
+  let seedId = current.selection === 2 ? current.bookId : null
+  if (current.selection !== 2) {
+    const selectionMessage = await performAction(child, 'down', 'screen=library selection=2/2 book=')
+    seedId = selectionMessage.match(/book=(book-[0-9a-f]{64})/)?.[1] ?? null
+  }
+  if (!seedId?.startsWith('book-')) throw new Error(`Could not resolve deterministic seed id from ${JSON.stringify(current)}`)
+
+  let message = await performAction(child, 'click', `screen=reader selection=2/2 book=${seedId}`)
+  await performAction(child, 'click', 'screen=menu')
+  let cursor = await moveMenuCursor(child, 1, 2)
+  let progress = message.match(/progress=(percent|page|hidden)/)?.[1] ?? current.progress
+  while (progress !== 'percent') {
+    message = await performAction(child, 'click', 'screen=menu')
+    progress = message.match(/progress=(percent|page|hidden)/)?.[1]
+  }
+  cursor = await moveMenuCursor(child, cursor, 3)
+  let density = Number(message.match(/density=(5|6|8)/)?.[1] ?? current.density)
+  while (density !== 6) {
+    message = await performAction(child, 'click', 'screen=menu')
+    density = Number(message.match(/density=(5|6|8)/)?.[1])
+  }
+  await moveMenuCursor(child, cursor, 1)
+  message = await performAction(child, 'click', `screen=reader selection=2/2 book=${seedId}`)
+  const pageMatch = message.match(/page=(\d+)\/(\d+)/)
+  if (!pageMatch) throw new Error(`Could not parse normalized reader state: ${message}`)
+  for (let page = Number(pageMatch[1]); page > 1; page--) {
+    await performAction(child, 'up', `book=${seedId} page=${page - 1}/`)
+  }
+  return { seedId, pageCount: Number(pageMatch[2]) }
 }
 
 let preview
@@ -251,48 +325,86 @@ try {
 
   const initialLaunch = await launchSimulator(true)
   simulator = initialLaunch.child
-  const firstSelection = await screenshotUntilStable('01-library-first-selected.png')
+  const normalized = await normalizeReader(simulator, initialLaunch)
+  const { seedId } = normalized
+  if (normalized.pageCount < 2) throw new Error(`Seeded book has only ${normalized.pageCount} pages at six lines`)
+  const page1 = await screenshotUntilStable('01-reader-page-1-percent.png')
 
-  const selectionMessage = await performAction(simulator, 'down', 'screen=library selection=2/2 book=')
-  const seedId = selectionMessage.match(/book=(book-[0-9a-f]{64})/)?.[1]
-  if (!seedId) throw new Error(`Could not parse deterministic seeded book id: ${selectionMessage}`)
-  const seededSelection = await screenshotUntilStable('01a-library-seed-selected.png')
-  const selectionBodyDiff = pixelDifferenceRegion(firstSelection, seededSelection, BODY_START_Y, BODY_END_Y)
-  if (selectionBodyDiff === 0) throw new Error('Moving the cursor to seeded book 2 did not change the library body')
+  // Footer cycle proof: tap opens the menu; Progress stays selected while its
+  // value cycles percent -> page -> hidden, with the footer region changing.
+  await performAction(simulator, 'click', `screen=menu selection=2/2 book=${seedId}`)
+  await moveMenuCursor(simulator, 1, 2)
+  const percentMenu = await screenshotUntilStable('02-menu-progress-percent.png')
+  await performAction(simulator, 'click', 'screen=menu')
+  const pageMenu = await screenshotUntilStable('03-menu-progress-page.png')
+  const percentToPageFooterDiff = pixelDifferenceRegion(
+    percentMenu, pageMenu, DEFAULT_BODY_END_Y, FOOTER_END_Y,
+  )
+  if (percentToPageFooterDiff === 0) throw new Error('Percent to page did not change the footer region')
 
-  const openedMessage = await performAction(simulator, 'click', `screen=reader selection=2/2 book=${seedId} page=`)
-  const openedMatch = openedMessage.match(/page=(\d+)\/(\d+)/)
-  if (!openedMatch || Number(openedMatch[2]) < 2) {
-    throw new Error(`Seeded book did not open with at least two pages: ${openedMessage}`)
+  await performAction(simulator, 'click', 'progress=hidden menu=2/4')
+  const hiddenMenu = await screenshotUntilStable('04-menu-progress-hidden.png')
+  const pageToHiddenFooterDiff = pixelDifferenceRegion(
+    pageMenu, hiddenMenu, DEFAULT_BODY_END_Y, FOOTER_END_Y,
+  )
+  if (pageToHiddenFooterDiff === 0) throw new Error('Page to hidden did not change the footer region')
+  if (litPixelsInRegion(hiddenMenu, DEFAULT_BODY_END_Y, FOOTER_END_Y) !== 0) {
+    throw new Error('Hidden progress left lit pixels in the footer region')
   }
-  const openedReader = await screenshotUntilStable('01b-opened-reader.png')
-  const libraryToReaderBody = pixelDifferenceRegion(seededSelection, openedReader, BODY_START_Y, BODY_END_Y)
-  if (libraryToReaderBody === 0) throw new Error('Opening the book did not change the reader body region')
 
-  for (let page = Number(openedMatch[1]); page > 1; page--) {
-    await performAction(simulator, 'up', `book=${seedId} page=${page - 1}/`)
+  // Return to percent, then page so the density proof can observe the changed
+  // page count in both the state marker and footer pixels.
+  await performAction(simulator, 'click', 'progress=percent menu=2/4')
+  const restoredPercentMenu = await screenshotUntilStable('05-menu-progress-percent-restored.png')
+  if (pixelDifferenceRegion(hiddenMenu, restoredPercentMenu, DEFAULT_BODY_END_Y, FOOTER_END_Y) === 0) {
+    throw new Error('Hidden to percent did not restore footer pixels')
   }
-  const page1 = await screenshotUntilStable('02-reader-page-1.png')
+  const pageStyleMessage = await performAction(simulator, 'click', 'progress=page menu=2/4')
+  const oldCount = Number(pageStyleMessage.match(/page=\d+\/(\d+)/)?.[1])
+  await moveMenuCursor(simulator, 2, 3)
+  const densitySixMenu = await screenshotUntilStable('06-menu-density-6.png')
+  const densityMessage = await performAction(simulator, 'click', 'density=8 progress=page menu=3/4')
+  const newCount = Number(densityMessage.match(/page=\d+\/(\d+)/)?.[1])
+  if (!oldCount || !newCount || oldCount === newCount) {
+    throw new Error(`Density did not change repaginated page count: ${pageStyleMessage} -> ${densityMessage}`)
+  }
+  const densityEightMenu = await screenshotUntilStable('07-menu-density-8.png')
+  const densityBodyDiff = pixelDifferenceRegion(
+    densitySixMenu, densityEightMenu, BODY_START_Y, DEFAULT_BODY_END_Y,
+  )
+  const densityFooterDiff = pixelDifferenceRegion(
+    densitySixMenu, densityEightMenu, COMPACT_FOOTER_START_Y, FOOTER_END_Y,
+  )
+  if (densityBodyDiff === 0) throw new Error('Density activation did not change the body region')
+  if (densityFooterDiff === 0) throw new Error('Density activation did not change the footer region')
 
-  await performAction(simulator, 'click', `book=${seedId} page=2/`)
-  const page2 = await screenshotUntilStable('03-reader-page-2.png')
-  const nextBodyDiff = pixelDifferenceRegion(page1, page2, BODY_START_Y, BODY_END_Y)
-  const nextFooterDiff = pixelDifferenceRegion(page1, page2, BODY_END_Y, FOOTER_END_Y)
-  if (nextBodyDiff === 0) throw new Error('Page 1 to 2 did not change the body region')
-  if (nextFooterDiff === 0) throw new Error('Page 1 to 2 did not change the footer region')
+  await moveMenuCursor(simulator, 3, 1)
+  await performAction(simulator, 'click', `screen=reader selection=2/2 book=${seedId}`)
+  const compactPage1 = await screenshotUntilStable('08-reader-page-1-compact.png')
+  if (pixelDifferenceRegion(densityEightMenu, compactPage1, BODY_START_Y, DEFAULT_BODY_END_Y) === 0) {
+    throw new Error('Continue did not restore the reader body from the menu')
+  }
 
-  await performAction(simulator, 'up', `book=${seedId} page=1/`)
-  const returnedPage1 = await screenshotUntilStable('04-reader-page-1-after-up.png')
-  if (pixelDifferenceRegion(page1, returnedPage1, BODY_START_Y, BODY_END_Y) !== 0) {
+  // Reader page turns are down/up; click is reserved for the menu.
+  await performAction(simulator, 'down', `screen=reader selection=2/2 book=${seedId} page=2/`)
+  const page2 = await screenshotUntilStable('09-reader-page-2.png')
+  const nextBodyDiff = pixelDifferenceRegion(compactPage1, page2, BODY_START_Y, DEFAULT_BODY_END_Y)
+  const nextFooterDiff = pixelDifferenceRegion(compactPage1, page2, COMPACT_FOOTER_START_Y, FOOTER_END_Y)
+  if (nextBodyDiff === 0) throw new Error('Scroll-down from page 1 to 2 did not change the body region')
+  if (nextFooterDiff === 0) throw new Error('Scroll-down from page 1 to 2 did not change the footer region')
+
+  await performAction(simulator, 'up', `screen=reader selection=2/2 book=${seedId} page=1/`)
+  const returnedPage1 = await screenshotUntilStable('10-reader-page-1-after-up.png')
+  if (pixelDifferenceRegion(compactPage1, returnedPage1, BODY_START_Y, DEFAULT_BODY_END_Y) !== 0) {
     throw new Error('Scroll-up did not restore page 1 body pixels')
   }
-  if (pixelDifferenceRegion(page1, returnedPage1, BODY_END_Y, FOOTER_END_Y) !== 0) {
+  if (pixelDifferenceRegion(compactPage1, returnedPage1, COMPACT_FOOTER_START_Y, FOOTER_END_Y) !== 0) {
     throw new Error('Scroll-up did not restore page 1 footer pixels')
   }
 
   // Move to a non-default page before relaunch so persistence cannot pass by
   // merely falling back to page 1.
-  await performAction(simulator, 'click', `book=${seedId} page=2/`)
+  await performAction(simulator, 'down', `book=${seedId} page=2/`)
 
   await stop(simulator)
   simulator = undefined
@@ -301,23 +413,21 @@ try {
   // evicting/reimporting the fixture and masking broken durable writes.
   const relaunch = await launchSimulator(false)
   simulator = relaunch.child
-  const relaunchedSelection = await performAction(simulator, 'down', `screen=library selection=2/2 book=${seedId}`)
-  if (!relaunchedSelection.includes(`book=${seedId}`)) {
-    throw new Error(`Relaunch did not converge on the same deterministic seeded book: ${relaunchedSelection}`)
+  if (relaunch.screen !== 'reader' || relaunch.bookId !== seedId || relaunch.page !== 2) {
+    throw new Error(`Relaunch did not resume directly into the saved book/page: ${relaunch.message}`)
   }
-  await performAction(simulator, 'click', `book=${seedId} page=2/`)
-  const restoredPage2 = await screenshotUntilStable('05-restored-page-2.png')
-  if (pixelDifferenceRegion(page2, restoredPage2, BODY_START_Y, BODY_END_Y) !== 0) {
+  const restoredPage2 = await screenshotUntilStable('11-resumed-reader-page-2.png')
+  if (pixelDifferenceRegion(page2, restoredPage2, BODY_START_Y, DEFAULT_BODY_END_Y) !== 0) {
     throw new Error('Relaunch did not restore page 2 body pixels')
   }
-  if (pixelDifferenceRegion(page2, restoredPage2, BODY_END_Y, FOOTER_END_Y) !== 0) {
+  if (pixelDifferenceRegion(page2, restoredPage2, COMPACT_FOOTER_START_Y, FOOTER_END_Y) !== 0) {
     throw new Error('Relaunch did not restore page 2 footer pixels')
   }
 
   console.log(
-    `SIM_PROOF_OK library_body_changed=${libraryToReaderBody} ` +
-    `selection_body_changed=${selectionBodyDiff} page_body_changed=${nextBodyDiff} ` +
-    `page_footer_changed=${nextFooterDiff} seeded_book=${seedId}`,
+    `SIM_PROOF_OK page_body_changed=${nextBodyDiff} page_footer_changed=${nextFooterDiff} ` +
+    `footer_percent_page=${percentToPageFooterDiff} footer_page_hidden=${pageToHiddenFooterDiff} ` +
+    `density_body_changed=${densityBodyDiff} density_footer_changed=${densityFooterDiff} seeded_book=${seedId}`,
   )
 } finally {
   await cleanupAll()

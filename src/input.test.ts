@@ -3,12 +3,12 @@ import { classifyInput, routeInput } from './input'
 
 describe('routeInput', () => {
   it('routes a sysEvent with omitted eventType as a click', () => {
-    expect(routeInput({ sysEvent: { eventSource: 1 } })).toBe('next')
+    expect(routeInput({ sysEvent: { eventSource: 1 } })).toBe('click')
   })
 
-  it('routes text scroll top to previous and scroll bottom to next', () => {
-    expect(routeInput({ textEvent: { eventType: 1 } })).toBe('prev')
-    expect(routeInput({ textEvent: { eventType: 2 } })).toBe('next')
+  it('decodes text scroll top as up and scroll bottom as down', () => {
+    expect(routeInput({ textEvent: { eventType: 1 } })).toBe('up')
+    expect(routeInput({ textEvent: { eventType: 2 } })).toBe('down')
   })
 
   it('routes double-click from either supported envelope to exit', () => {
@@ -40,10 +40,10 @@ describe('classifyInput', () => {
   it.each([
     [{}, null],
     [{ textEvent: {} }, null],
-    [{ sysEvent: {} }, 'next'],
-    [{ sysEvent: { eventType: 0 } }, 'next'],
-    [{ sysEvent: { eventSource: 1 }, textEvent: { eventType: 1 } }, 'prev'],
-    [{ textEvent: { eventType: 2 } }, 'next'],
+    [{ sysEvent: {} }, 'click'],
+    [{ sysEvent: { eventType: 0 } }, 'click'],
+    [{ sysEvent: { eventSource: 1 }, textEvent: { eventType: 1 } }, 'up'],
+    [{ textEvent: { eventType: 2 } }, 'down'],
     [{ textEvent: { eventType: 3 } }, 'exit'],
   ] as const)('classifies absent, omitted-zero, and explicit user envelope %#', (event, action) => {
     expect(classifyInput(event)).toEqual(action === null ? { kind: 'none' } : { kind: 'user', action })

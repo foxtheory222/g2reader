@@ -1,4 +1,4 @@
-# Product Decisions — G2 Reader
+# Product Decisions — Readpane
 
 Stephen owns every entry here. Agents do not implement ahead of a recorded decision.
 
@@ -21,8 +21,12 @@ Stephen owns every entry here. Agents do not implement ahead of a recorded decis
    bundled Alice and add phone-side PDF/TXT import backed by IndexedDB.
 2. PDF strategy — **closed by the 2026-07-20 PDF-strategy decision below.**
 3. Reading UX — **closed by the 2026-07-20 reading-UX decision below.**
-4. App name + final package_id before first pack — **pending: name research
-   in flight; Stephen delegated the choice to Fable's recommendation.**
+4. App name + final package_id — **closed 2026-07-20: "Readpane" /
+   `com.stephen.readpane`** (Stephen delegated; research-cleared against the
+   Even Hub ecosystem, app stores, GitHub, and indexed trademark searches;
+   store listing must state it is an independent app not affiliated with
+   Even Realities; run `evenhub pack --check` availability check at first
+   pack).
 5. Format priority — **closed below: EPUB next, then Markdown.**
 6. Resume behavior — **closed below: resume into the last-read book.**
 

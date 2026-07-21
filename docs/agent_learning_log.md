@@ -1,4 +1,4 @@
-# Agent Learning Log — G2 Reader
+# Agent Learning Log — Readpane
 
 Append-only. Reusable learnings, golden paths, gotchas. Newest at bottom.
 
@@ -192,3 +192,26 @@ Append-only. Reusable learnings, golden paths, gotchas. Newest at bottom.
   repo-shaped directory, run it from an unrelated cwd with `--output-dir`, and
   assert only the requested fixture is emitted. Set both Swift and Clang module
   caches inside the temporary directory in sandboxed runs.
+
+## 2026-07-20 — Slice 3 reader menu and resume
+
+- **Idempotent resume harnesses must normalize persisted UI settings:** a
+  second simulator-proof run correctly starts in the last-read book with the
+  prior density/progress choices, so a harness that assumes library/defaults
+  is inherently one-shot. Enter the menu, return to Library when needed,
+  select the deterministic fixture, cycle progress/density to a known baseline,
+  then begin pixel evidence. Keep the final unseeded relaunch unnormalized so
+  it proves direct resume into the saved book and page.
+
+## 2026-07-20 — Slice 3 staged UI commits
+
+- **Persist from confirmed render snapshots, never pagination globals:** carry
+  the book ID, page index, page count, density, progress style, body, footer,
+  and copied reader state in each queued render. A density rebuild paginates
+  into a local cache and publishes the cache/settings/position only after the
+  structural lane confirms success.
+- **Use one mutation-backed coordinator for phone and glasses structure:**
+  enqueue menu/reader/library transitions and companion import/removal through
+  the same pending-count lane. Keep the target local, let the render queue own
+  bridge serialization, then publish routing on success or restore routing to
+  the last rendered state on failure.

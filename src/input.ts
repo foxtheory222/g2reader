@@ -1,6 +1,6 @@
 import { OsEventTypeList } from '@evenrealities/even_hub_sdk'
 
-export type InputAction = 'next' | 'prev' | 'exit' | null
+export type InputAction = 'click' | 'up' | 'down' | 'exit' | null
 
 interface EventEnvelope {
   eventType?: number
@@ -28,9 +28,9 @@ export function routeInput(event: WireEvent): InputAction {
   if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     return 'exit'
   }
-  if (textType === OsEventTypeList.SCROLL_TOP_EVENT) return 'prev'
-  if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) return 'next'
-  if (sysType === OsEventTypeList.CLICK_EVENT) return 'next'
+  if (textType === OsEventTypeList.SCROLL_TOP_EVENT) return 'up'
+  if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) return 'down'
+  if (sysType === OsEventTypeList.CLICK_EVENT) return 'click'
   return null
 }
 
