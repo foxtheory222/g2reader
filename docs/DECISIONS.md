@@ -17,21 +17,40 @@ Stephen owns every entry here. Agents do not implement ahead of a recorded decis
 - **Test device:** Android phone + Even Realities app via adb reverse.
 
 ## Open — reserved for Stephen (do not implement)
-1. Book ingestion model: bundled library folder vs in-app import (WebView file
-   picker — needs on-device spike) vs both; .ehpk size limits to check.
-   **Closed by the Slice 2 decision below:** keep bundled Alice and add
-   phone-side PDF/TXT import backed by IndexedDB.
-2. PDF strategy: text-extraction reflow vs rendered page images (spike both on a
-   real PDF, show screenshots).
-3. Reading UX: discrete page turns vs continuous scroll; touchpad vs ring as
-   primary; font size/margins; progress display format.
-   **Implemented interim under kickoff defaults, awaiting Stephen:** discrete
-   pages, touchpad tap/swipe navigation, fixed geometry/font metrics, and a
-   numeric page footer; the product choice remains open.
-4. App name + final package_id before first pack.
-5. Format priority after TXT + PDF (EPUB? Markdown?).
-6. Resume behavior after relaunch/WebView migration: library vs reader
-   (S2-05 deferred pending real-device semantics).
+1. Book ingestion model — **closed by the Slice 2 decision below:** keep
+   bundled Alice and add phone-side PDF/TXT import backed by IndexedDB.
+2. PDF strategy — **closed by the 2026-07-20 PDF-strategy decision below.**
+3. Reading UX — **closed by the 2026-07-20 reading-UX decision below.**
+4. App name + final package_id before first pack — **pending: name research
+   in flight; Stephen delegated the choice to Fable's recommendation.**
+5. Format priority — **closed below: EPUB next, then Markdown.**
+6. Resume behavior — **closed below: resume into the last-read book.**
+
+## 2026-07-20 — Reading UX, resume, and format priority (Stephen delegated:
+"use your recommended choice"; Fable's recommendations adopted)
+- **Input semantics (reading):** scroll-down / ring-forward = next page;
+  scroll-up / ring-back = previous page; TAP = open the compact reader menu
+  (changed from tap-next: accidental-tap page turns are the top trust-killer
+  in Kobo/Librera review evidence; "one gesture, one meaning"). Double-tap =
+  exit via host confirmation, unchanged, everywhere.
+- **Reader menu (glasses, one level):** Continue · Progress style · Density ·
+  Library. Rendered in the existing body container with the `>` cursor;
+  scroll moves, tap selects. Bookmarks and Contents wait for their features.
+- **Progress footer:** cycling compact form — percent → page x/y → hidden
+  (time-left deferred until reading-speed tracking exists). One form at a
+  time, never stacked.
+- **Density presets:** Relaxed 5 / Standard 6 (default) / Compact 8 lines.
+  Full 576px measure retained (~59 chars/line sits inside the canonical
+  45-75-char readability band); exact comfort needs real-G2 validation.
+  On density change, position maps by relative progress (closes deferred
+  S2-06 for practical purposes).
+- **Resume:** app relaunch opens the LAST-READ book at its saved position
+  ("resume first, render second" — the single most-loved reader behavior in
+  the evidence). Library is one tap away via the menu. First-ever launch
+  still lands on the library. (Supersedes the S2-05 open question for boot
+  behavior; real-device WebView-migration validation still required.)
+- **Format priority:** EPUB next (real G2-owner demand, community precedent,
+  structurally ideal for reflow), then Markdown. Both feed the same reader.
 
 ## 2026-07-20 — PDF strategy (Stephen, closes open item 2)
 Stephen directed: study the existing G2 PDF/document apps on GitHub and follow
