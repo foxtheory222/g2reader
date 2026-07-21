@@ -69,6 +69,17 @@ DECIDED: PDF = phone-side pdfjs-dist text extraction feeding the same reader
 pipeline as TXT, with honest refusal for unsupported classes (scanned/no-text).
 No page-image reading mode. Cloud/AI extraction is out.
 
+## 2026-07-20 — Slice 4 EPUB (per format-priority decision)
+
+- Local `.epub` files use bundled JSZip plus WebView DOM parsing to follow OPF
+  spine order, preserve structured paragraph/chapter boundaries, and feed the
+  existing plaintext store and paginator. Package title/author and chapter
+  offsets are retained; no EPUB-specific glasses UI is introduced.
+- The PDF slice's 25 MB pre-read and 2,000,000 extracted-character interim
+  limits apply. Invalid ZIP/container/OPF data, DRM or non-font encryption,
+  predominantly pre-paginated fixed layout, empty text, and encoding garbage
+  are honestly refused. Font obfuscation alone is not classified as DRM.
+
 ## 2026-07-20 — Slice 2 imported library and input semantics (Stephen)
 
 - The phone companion accepts one local `.pdf` or `.txt` through the Web File
@@ -112,6 +123,14 @@ No page-image reading mode. Cloud/AI extraction is out.
 - Imported-book IDs use SHA-256 of text content. No production records exist,
   so the pre-release FNV identifier has no migration requirement.
 
+## 2026-07-20 — File picker shows all files (delegated; device-validated)
+Real-device finding: Android's picker hides transferred `.epub` files when an
+`accept` MIME filter is set (adb-pushed and some downloaded files carry
+`application/octet-stream`/`application/zip`). DECIDED: the companion file
+input uses NO accept filter; the label names the supported formats and the
+import pipeline refuses unsupported files honestly before reading content.
+Predictability over advisory MIME filtering.
+
 ## Glasses input semantics — walking skeleton (interim, per kickoff; Stephen may revise)
 - **Implemented interim under kickoff defaults, awaiting Stephen.** This records
   the current slice behavior without closing open reading-UX item 3.
@@ -139,6 +158,11 @@ No page-image reading mode. Cloud/AI extraction is out.
 - Body/footer upgrades, library rebuilds, and shutdown are coordinated through
   one host-exit-aware UI lane. Durable import/removal success is reported
   independently from a failed glasses refresh, which retries on later input.
+- After a durable library mutation, the phone list reflects store truth
+  immediately while glasses routing remains at its last confirmed snapshot.
+  A pending library rebuild runs before the next glasses gesture or foreground
+  entry. If that retry fails, the triggering gesture is consumed; if it
+  succeeds, routing commits first and the gesture then acts on the new library.
 - Simulator durability proof seeds only the first launch; relaunch omits the
   seed query and must load the same book and reading position from storage.
 

@@ -215,3 +215,38 @@ Append-only. Reusable learnings, golden paths, gotchas. Newest at bottom.
   the same pending-count lane. Keep the target local, let the render queue own
   bridge serialization, then publish routing on success or restore routing to
   the last rendered state on failure.
+
+## 2026-07-20 — Slice 4 EPUB import
+
+- **DOMParser test gap:** Node 24 exposes no global `DOMParser`, and this repo
+  has no installed jsdom/happy-dom package. With new dependencies forbidden,
+  fixture tests install a small XML-only DOM implementation from
+  `tests/support`; production still uses the WebView's standard `DOMParser`.
+- **JSZip offline census:** the bundled dependency adds four static
+  license/help URLs and one `importScripts` feature-detection token. EPUB font
+  obfuscation adds two algorithm-identifier URLs. All are exact reviewed
+  populations; none is a request target or call.
+
+## 2026-07-20 — Slice 4 audit remediation
+
+- **JSZip bounded-inflation path:** `loadAsync` parses ZIP records without
+  inflating file bodies. Inspect each loaded entry's central-directory
+  `uncompressedSize` first, then consume selected entries through
+  `internalStream('uint8array')`; pause and reject on the first chunk that
+  would cross either the per-entry or cumulative emitted-byte ceiling.
+  Declared-size and emitted-size gates are both required because a forged
+  central directory can understate expansion.
+- **OCF names remain exact:** reject any `unsafeOriginalName` changed by
+  JSZip's zip-slip sanitization, plus normalized or case-folded collisions.
+  Keep `mimetype`, container, package, manifest, encryption, and spine lookups
+  case-sensitive; URI percent-decoding belongs in reference resolution, not
+  archive-name fallback.
+- **Companion truth and glasses routing are separate commit domains:** publish
+  a post-mutation store snapshot to the phone immediately, retain the last
+  confirmed books for gesture routing, and keep the failed structural plan for
+  retry. Commit routing only after the retry rebuild succeeds, then act on the
+  triggering gesture.
+- **EPUB fixture provenance:** keep every committed `.epub` in the JSZip-based
+  generator and byte-compare a full temporary regeneration in tests. A hostile
+  forged-size fixture can be produced deterministically by patching only the
+  target central-directory uncompressed-size field after generation.

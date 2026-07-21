@@ -4,11 +4,16 @@ export interface Book {
   text: string
   source: 'bundled' | 'imported'
   importedAt?: number
+  author?: string
+  chapterOffsets?: number[]
   columnsSuspected?: boolean
   pageCharOffsets?: number[]
 }
 
 export interface ImportMetadata {
+  title?: string
+  author?: string
+  chapterOffsets?: number[]
   columnsSuspected?: boolean
   pageCharOffsets?: number[]
 }
@@ -58,8 +63,13 @@ export async function stableBookId(text: string): Promise<string> {
 
 export function titleFromFilename(filename: string): string {
   const leaf = filename.replaceAll('\\', '/').split('/').pop()?.replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]+/gu, ' ').replace(/\s+/gu, ' ').trim() ?? ''
-  const withoutExtension = leaf.replace(/\.(?:pdf|txt)$/i, '').trim()
+  const withoutExtension = leaf.replace(/\.(?:epub|pdf|txt)$/i, '').trim()
   return withoutExtension || leaf || 'Untitled'
+}
+
+function normalizedMetadataText(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+  return normalized || undefined
 }
 
 function isBook(value: unknown): value is Book {
@@ -158,10 +168,12 @@ export function createBookStore(options: BookStoreOptions = {}): BookStore {
     async importText(filename, text, metadata = {}) {
       const book: Book = {
         id: await stableBookId(text),
-        title: titleFromFilename(filename),
+        title: normalizedMetadataText(metadata.title) ?? titleFromFilename(filename),
         text,
         source: 'imported',
         importedAt: clock(),
+        ...(normalizedMetadataText(metadata.author) ? { author: normalizedMetadataText(metadata.author) } : {}),
+        ...(metadata.chapterOffsets ? { chapterOffsets: [...metadata.chapterOffsets] } : {}),
         ...(metadata.columnsSuspected ? { columnsSuspected: true } : {}),
         ...(metadata.pageCharOffsets ? { pageCharOffsets: [...metadata.pageCharOffsets] } : {}),
       }

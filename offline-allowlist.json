@@ -119,6 +119,30 @@
     {
       "literal": "http://www.xfa.org/schema/xfa-data/1.0/",
       "comment": "XFA datasets serialization namespace emitted into XML text; it is not fetched."
+    },
+    {
+      "literal": "http://stuartk.com/jszip",
+      "comment": "Static JSZip copyright-holder URL in the bundled license header; never used as a request target."
+    },
+    {
+      "literal": "https://raw.github.com/Stuk/jszip/main/LICENSE.markdown.",
+      "comment": "Static JSZip license URL emitted in a bundle comment, including its sentence-ending period; never used at runtime."
+    },
+    {
+      "literal": "https://github.com/nodeca/pako/blob/main/LICENSE",
+      "comment": "Static pako license URL emitted in a bundle comment; never used at runtime."
+    },
+    {
+      "literal": "https://stuk.github.io/jszip/documentation/howto/read_zip.html",
+      "comment": "Static JSZip troubleshooting URL embedded only in its malformed-ZIP error message; never used as a request target."
+    },
+    {
+      "literal": "http://www.idpf.org/2008/embedding",
+      "comment": "IDPF font-obfuscation algorithm identifier compared against encryption.xml metadata; it is never fetched."
+    },
+    {
+      "literal": "http://ns.adobe.com/pdf/enc#RC",
+      "comment": "Adobe font-obfuscation algorithm identifier compared against encryption.xml metadata; it is never fetched."
     }
   ],
   "networkApiTokens": [
@@ -136,6 +160,11 @@
       "token": "EventSource",
       "count": 1,
       "comment": "This is the Even Hub SDK's protobuf field-name string for input eventSource, not construction or use of the browser EventSource network API."
+    },
+    {
+      "token": "importScripts",
+      "count": 1,
+      "comment": "Exact population: JSZip's bundled setImmediate polyfill checks for the presence of importScripts only to distinguish a worker from a window before selecting a local scheduling strategy; it never calls importScripts."
     }
   ]
 }

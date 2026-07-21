@@ -16,8 +16,10 @@ import {
   startupStorageNotice,
 } from './companion-status'
 import { importBookFile } from './file-import'
+import { extractEpubText } from './epub-extract'
 import { classifyInput } from './input'
 import { libraryBody, libraryFooter, moveLibrarySelection, visibleLibraryBooks } from './library'
+import { createLibraryRefreshCoordinator } from './library-refresh'
 import { paginate } from './paginate'
 import { extractPdfText } from './pdf-extract'
 import { createPositionStore, remapPageIndex } from './position-store'
@@ -90,6 +92,7 @@ if (import.meta.env.DEV && shouldSeedSimulatorBook(window.location.search, true)
 }
 const initialImportedBooks = await bookStore.list()
 let books: Book[] = [ALICE_BOOK, ...initialImportedBooks.books]
+let routedBooks: Book[] = books
 let pageCache = new Map<string, string[]>()
 let settings = settingsStore.read()
 let density: Density = settings.density
@@ -110,11 +113,11 @@ function pagesFor(
   return usable
 }
 
-function bookById(bookId: string, sourceBooks: readonly Book[] = books): Book {
+function bookById(bookId: string, sourceBooks: readonly Book[] = routedBooks): Book {
   return sourceBooks.find(book => book.id === bookId) ?? ALICE_BOOK
 }
 
-function selectedBook(state: ReaderState, sourceBooks: readonly Book[] = books): Book {
+function selectedBook(state: ReaderState, sourceBooks: readonly Book[] = routedBooks): Book {
   return visibleLibraryBooks(sourceBooks)[state.selectedBookIndex] ?? ALICE_BOOK
 }
 
@@ -139,7 +142,7 @@ interface SnapshotContext {
 }
 
 function snapshotFor(state: ReaderState, context: SnapshotContext = {}): ReaderRenderSnapshot {
-  const sourceBooks = context.sourceBooks ?? books
+  const sourceBooks = context.sourceBooks ?? routedBooks
   const targetCache = context.targetCache ?? pageCache
   const targetDensity = context.targetDensity ?? density
   const targetProgressStyle = context.targetProgressStyle ?? progressStyle
@@ -176,8 +179,8 @@ app.innerHTML = `
       <span id="pageCount" style="font-size:12px;color:#919191;"></span>
     </header>
     <section style="background:#242424;border:1px solid #3E3E3E;border-radius:12px;padding:16px;margin-bottom:16px;">
-      <label for="bookFile" style="display:block;font-size:13px;color:#E5E5E5;margin-bottom:8px;">Import a PDF or TXT file</label>
-      <input id="bookFile" type="file" accept=".pdf,.txt,application/pdf,text/plain" style="max-width:100%;color:#BDBDBD;" />
+      <label for="bookFile" style="display:block;font-size:13px;color:#E5E5E5;margin-bottom:8px;">Import a PDF, EPUB, or TXT file</label>
+      <input id="bookFile" type="file" style="max-width:100%;color:#BDBDBD;" />
       <div id="importStatus" role="status" style="min-height:18px;font-size:12px;color:#AFAFAF;margin-top:8px;"></div>
       <div id="bookList" style="display:grid;gap:8px;margin-top:12px;"></div>
     </section>
@@ -231,7 +234,7 @@ function mirrorCompanion(snapshot: ReaderRenderSnapshot) {
   if (mirror) mirror.textContent = snapshot.body
   if (count) {
     count.textContent = state.screen === 'library'
-      ? `Library · ${Math.min(books.length, 5)} shown`
+      ? `Library · ${Math.min(routedBooks.length, 5)} shown`
       : state.screen === 'menu'
         ? `Reader menu · ${book.title}`
         : `${snapshot.pageIndex + 1} / ${snapshot.pageCount}`
@@ -242,7 +245,7 @@ function logState(snapshot: ReaderRenderSnapshot) {
   const state = snapshot.state
   const book = state.screen === 'library' ? selectedBook(state) : bookById(snapshot.bookId)
   console.info(
-    `G2_READER_STATE screen=${state.screen} selection=${state.selectedBookIndex + 1}/${Math.min(books.length, 5)} book=${book.id} page=${snapshot.pageIndex + 1}/${snapshot.pageCount} density=${snapshot.density} progress=${snapshot.progressStyle} menu=${state.menuIndex + 1}/4 bodyHeight=${state.screen === 'library' ? LIBRARY_BODY_H : readerLayout(snapshot.density).bodyHeight}`,
+    `G2_READER_STATE screen=${state.screen} selection=${state.selectedBookIndex + 1}/${Math.min(routedBooks.length, 5)} book=${book.id} page=${snapshot.pageIndex + 1}/${snapshot.pageCount} density=${snapshot.density} progress=${snapshot.progressStyle} menu=${state.menuIndex + 1}/4 bodyHeight=${state.screen === 'library' ? LIBRARY_BODY_H : readerLayout(snapshot.density).bodyHeight}`,
   )
 }
 
@@ -332,7 +335,7 @@ function makePager(content: string, footerY: number) {
   })
 }
 
-function libraryTarget(selectedIndex: number, sourceBooks: readonly Book[] = books) {
+function libraryTarget(selectedIndex: number, sourceBooks: readonly Book[] = routedBooks) {
   const visibleCount = Math.max(1, Math.min(sourceBooks.length, 5))
   const clampedSelection = Math.max(0, Math.min(visibleCount - 1, selectedIndex))
   const book = visibleLibraryBooks(sourceBooks)[clampedSelection] ?? ALICE_BOOK
@@ -363,22 +366,38 @@ function restoreRouting(priorDesired: ReaderState) {
   desiredState = renderedState ? { ...renderedState } : { ...priorDesired }
 }
 
+interface PendingLibraryRefresh {
+  books: Book[]
+  target: ReaderState
+  snapshot: ReaderRenderSnapshot
+}
+
+const libraryRefresh = createLibraryRefreshCoordinator<PendingLibraryRefresh>({
+  publishCompanion: pending => {
+    books = pending.books
+    renderPhoneBookList()
+  },
+  displayStructural: pending => displayStructural(pending.snapshot, LIBRARY_BODY_H, LIBRARY_FOOTER_Y),
+  commitRouting: pending => {
+    routedBooks = pending.books
+    desiredState = { ...pending.target }
+    commitState(pending.snapshot)
+  },
+})
+
 async function refreshImportedBooks(selectedBookId?: string) {
   const imported = await bookStore.list()
   const nextBooks = [ALICE_BOOK, ...imported.books]
   const visible = visibleLibraryBooks(nextBooks)
   const selectedIndex = selectedBookId ? Math.max(0, visible.findIndex(book => book.id === selectedBookId)) : 0
   const { target, snapshot } = libraryTarget(selectedIndex, nextBooks)
-  await displayStructural(snapshot, LIBRARY_BODY_H, LIBRARY_FOOTER_Y)
-  books = nextBooks
-  desiredState = { ...target }
-  renderPhoneBookList()
-  commitState(snapshot)
+  await libraryRefresh.stage({ books: nextBooks, target, snapshot })
 }
 
 async function removeImportedBook(book: Book) {
   setImportStatus(`Removing ${book.title}…`)
   const removed = await bookStore.remove(book.id)
+  pageCache.delete(book.id)
   try {
     await refreshImportedBooks()
   } catch (error) {
@@ -386,7 +405,6 @@ async function removeImportedBook(book: Book) {
     reportBridgeFailure(error)
     return
   }
-  pageCache.delete(book.id)
   setImportStatus(removalSuccessMessage(book.title, removed.durability))
 }
 
@@ -395,7 +413,11 @@ fileInput.addEventListener('change', () => {
   if (!file) return
   setImportStatus(`Importing ${file.name}…`)
   void uiCoordinator.runMutation(async () => {
-    const result = await importBookFile(file, { store: bookStore, extractPdf: extractPdfText })
+    const result = await importBookFile(file, {
+      store: bookStore,
+      extractEpub: extractEpubText,
+      extractPdf: extractPdfText,
+    })
     if (result.status === 'unsupported') {
       setImportStatus(result.reason)
       return
@@ -439,9 +461,9 @@ function openReader() {
 }
 
 function moveSelection(delta: -1 | 1) {
-  const selectedBookIndex = moveLibrarySelection(desiredState.selectedBookIndex, delta, books.length)
+  const selectedBookIndex = moveLibrarySelection(desiredState.selectedBookIndex, delta, routedBooks.length)
   if (selectedBookIndex === desiredState.selectedBookIndex) return
-  const book = visibleLibraryBooks(books)[selectedBookIndex] ?? ALICE_BOOK
+  const book = visibleLibraryBooks(routedBooks)[selectedBookIndex] ?? ALICE_BOOK
   const pages = pagesFor(book)
   desiredState = {
     screen: 'library',
@@ -506,7 +528,7 @@ function changeDensity() {
   const nextDensity = cycleDensity(density)
   const stagedPageCache = new Map<string, string[]>()
   for (const bookId of new Set([...pageCache.keys(), book.id])) {
-    const cachedBook = books.find(candidate => candidate.id === bookId)
+    const cachedBook = routedBooks.find(candidate => candidate.id === bookId)
     if (cachedBook) pagesFor(cachedBook, nextDensity, stagedPageCache)
   }
   const newPages = pagesFor(book, nextDensity, stagedPageCache)
@@ -536,7 +558,7 @@ function returnToLibrary() {
   const priorDesired = { ...desiredState }
   const selectedIndex = Math.max(
     0,
-    visibleLibraryBooks(books).findIndex(book => book.id === priorDesired.activeBookId),
+    visibleLibraryBooks(routedBooks).findIndex(book => book.id === priorDesired.activeBookId),
   )
   const { target, snapshot } = libraryTarget(selectedIndex)
   return uiCoordinator.runTransition({
@@ -590,62 +612,81 @@ function cleanup() {
   unsubscribe = null
 }
 
+function routeClassifiedInput(classified: ReturnType<typeof classifyInput>) {
+  if (classified.kind === 'lifecycle') {
+    if (
+      classified.type === OsEventTypeList.SYSTEM_EXIT_EVENT ||
+      classified.type === OsEventTypeList.ABNORMAL_EXIT_EVENT
+    ) {
+      renderQueue.confirmHostExit()
+      cleanup()
+      return
+    }
+
+    if (
+      classified.type === OsEventTypeList.FOREGROUND_ENTER_EVENT &&
+      (desiredState.screen === 'reader' || desiredState.screen === 'menu') &&
+      !uiCoordinator.pending
+    ) {
+      const book = bookById(desiredState.activeBookId)
+      const pages = pagesFor(book)
+      desiredState = {
+        ...desiredState,
+        pageIndex: positionStore.restore(book.id, pages.length, density),
+      }
+      renderDesiredState().catch(reportBridgeFailure)
+    }
+    return
+  }
+
+  if (classified.kind !== 'user') return
+  if (classified.action === 'exit') {
+    if (renderQueue.exitPending) return
+    renderQueue.requestShutdown(() => enqueueBridge(() => bridge.shutDownPageContainer(1))).catch(reportBridgeFailure)
+    return
+  }
+  if (renderQueue.exitPending) return
+  if (uiCoordinator.pending) return
+
+  if (desiredState.screen === 'library') {
+    if (classified.action === 'click') openReader().catch(reportBridgeFailure)
+    else if (classified.action === 'up') moveSelection(-1)
+    else if (classified.action === 'down') moveSelection(1)
+    return
+  }
+
+  if (desiredState.screen === 'menu') {
+    if (classified.action === 'click') activateMenuItem()
+    else if (classified.action === 'up') moveMenu(-1)
+    else if (classified.action === 'down') moveMenu(1)
+    return
+  }
+
+  if (classified.action === 'click') openMenu().catch(reportBridgeFailure)
+  else if (classified.action === 'up') navigate(-1)
+  else if (classified.action === 'down') navigate(1)
+}
+
 function subscribeToInput() {
   return bridge.onEvenHubEvent(event => {
     const classified = classifyInput(event)
+    const isHostExit = classified.kind === 'lifecycle' && (
+      classified.type === OsEventTypeList.SYSTEM_EXIT_EVENT ||
+      classified.type === OsEventTypeList.ABNORMAL_EXIT_EVENT
+    )
+    const triggersRefreshRetry = classified.kind === 'user' || (
+      classified.kind === 'lifecycle' && classified.type === OsEventTypeList.FOREGROUND_ENTER_EVENT
+    )
 
-    if (classified.kind === 'lifecycle') {
-      if (
-        classified.type === OsEventTypeList.SYSTEM_EXIT_EVENT ||
-        classified.type === OsEventTypeList.ABNORMAL_EXIT_EVENT
-      ) {
-        renderQueue.confirmHostExit()
-        cleanup()
-        return
-      }
-
-      if (
-        classified.type === OsEventTypeList.FOREGROUND_ENTER_EVENT &&
-        (desiredState.screen === 'reader' || desiredState.screen === 'menu') &&
-        !uiCoordinator.pending
-      ) {
-        const book = bookById(desiredState.activeBookId)
-        const pages = pagesFor(book)
-        desiredState = {
-          ...desiredState,
-          pageIndex: positionStore.restore(book.id, pages.length, density),
-        }
-        renderDesiredState().catch(reportBridgeFailure)
-      }
+    if (!isHostExit && triggersRefreshRetry && libraryRefresh.pending) {
+      if (uiCoordinator.pending) return
+      void uiCoordinator.runMutation(async () => {
+        if (await libraryRefresh.retry()) routeClassifiedInput(classified)
+      }).catch(reportBridgeFailure)
       return
     }
 
-    if (classified.kind !== 'user') return
-    if (classified.action === 'exit') {
-      if (renderQueue.exitPending) return
-      renderQueue.requestShutdown(() => enqueueBridge(() => bridge.shutDownPageContainer(1))).catch(reportBridgeFailure)
-      return
-    }
-    if (renderQueue.exitPending) return
-    if (uiCoordinator.pending) return
-
-    if (desiredState.screen === 'library') {
-      if (classified.action === 'click') openReader().catch(reportBridgeFailure)
-      else if (classified.action === 'up') moveSelection(-1)
-      else if (classified.action === 'down') moveSelection(1)
-      return
-    }
-
-    if (desiredState.screen === 'menu') {
-      if (classified.action === 'click') activateMenuItem()
-      else if (classified.action === 'up') moveMenu(-1)
-      else if (classified.action === 'down') moveMenu(1)
-      return
-    }
-
-    if (classified.action === 'click') openMenu().catch(reportBridgeFailure)
-    else if (classified.action === 'up') navigate(-1)
-    else if (classified.action === 'down') navigate(1)
+    routeClassifiedInput(classified)
   })
 }
 
@@ -673,7 +714,7 @@ unsubscribe = await initializeStartup({
   onReady: () => {
     commitState(initialSnapshot)
     console.info(
-      `G2_READER_READY screen=${desiredState.screen} selection=${desiredState.selectedBookIndex + 1}/${Math.min(books.length, 5)} book=${initialBook.id} page=${initialSnapshot.pageIndex + 1}/${initialSnapshot.pageCount} density=${initialSnapshot.density} progress=${initialSnapshot.progressStyle}`,
+      `G2_READER_READY screen=${desiredState.screen} selection=${desiredState.selectedBookIndex + 1}/${Math.min(routedBooks.length, 5)} book=${initialBook.id} page=${initialSnapshot.pageIndex + 1}/${initialSnapshot.pageCount} density=${initialSnapshot.density} progress=${initialSnapshot.progressStyle}`,
     )
   },
   onFailed: reason => {

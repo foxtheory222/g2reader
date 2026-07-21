@@ -1,5 +1,13 @@
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
+import { hasMostlyGarbageText } from './text-quality'
+
+export {
+  hasMostlyGarbageText,
+  MAX_MOJIBAKE_PREFIX_RATIO,
+  MAX_SINGLE_CHARACTER_RATIO,
+  MIN_CHARACTER_ENTROPY,
+} from './text-quality'
 
 if (typeof window !== 'undefined') GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -60,15 +68,6 @@ const ROTATED_REASON = 'This PDF uses predominantly rotated/vertical text, which
 export const MAX_PDF_PAGES = 1_000
 export const MAX_EXTRACTED_CHARACTERS = 2_000_000
 export const FURNITURE_EDGE_BAND_RATIO = 0.15
-// These intentionally conservative corruption gates only run on a meaningful
-// sample. They catch degenerate ToUnicode output without pretending to judge
-// language quality: one character may occupy at most 80%, Shannon entropy must
-// reach 1.5 bits/character, and common UTF-8-as-Latin1 prefixes may occupy at
-// most 5% of non-whitespace text (with at least two occurrences).
-export const MAX_SINGLE_CHARACTER_RATIO = 0.8
-export const MIN_CHARACTER_ENTROPY = 1.5
-export const MAX_MOJIBAKE_PREFIX_RATIO = 0.05
-const MIN_ENTROPY_SAMPLE = 64
 
 function emptyMeta(pageCount = 0, pageCharOffsets: number[] = []): PdfExtractionMeta {
   return {
@@ -264,55 +263,6 @@ function offsetsForPages(pageTexts: string[]): number[] {
     if (index < pageTexts.length - 1) cursor += 2
   }
   return offsets
-}
-
-export function hasMostlyGarbageText(text: string): boolean {
-  const points = Array.from(text)
-  if (!points.length) return false
-  const privateOrReplacement = points.filter(character => {
-    const codePoint = character.codePointAt(0) ?? 0
-    return (
-      codePoint === 0xfffd ||
-      (codePoint >= 0xe000 && codePoint <= 0xf8ff) ||
-      (codePoint >= 0xf0000 && codePoint <= 0xffffd) ||
-      (codePoint >= 0x100000 && codePoint <= 0x10fffd)
-    )
-  }).length
-  if (privateOrReplacement / points.length > 0.1) return true
-
-  const allowedWhitespace = (character: string) => character === '\n' || character === '\t'
-  const controls = points.filter(character => {
-    if (allowedWhitespace(character)) return false
-    const codePoint = character.codePointAt(0) ?? 0
-    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
-  }).length
-  if (controls / points.length > 0.02) return true
-
-  const nonPrintable = points.filter(character => !allowedWhitespace(character) && /\p{C}/u.test(character)).length
-  if (nonPrintable / points.length > 0.1) return true
-
-  const nonWhitespace = points.filter(character => !/\s/u.test(character))
-  const letters = nonWhitespace.filter(character => /\p{L}/u.test(character)).length
-  if (nonWhitespace.length >= 12 && letters / nonWhitespace.length < 0.2) return true
-
-  if (nonWhitespace.length >= MIN_ENTROPY_SAMPLE) {
-    const frequencies = new Map<string, number>()
-    for (const character of nonWhitespace) {
-      frequencies.set(character, (frequencies.get(character) ?? 0) + 1)
-    }
-    const largestFrequency = Math.max(...frequencies.values())
-    if (largestFrequency / nonWhitespace.length > MAX_SINGLE_CHARACTER_RATIO) return true
-
-    let entropy = 0
-    for (const frequency of frequencies.values()) {
-      const probability = frequency / nonWhitespace.length
-      entropy -= probability * Math.log2(probability)
-    }
-    if (entropy < MIN_CHARACTER_ENTROPY) return true
-  }
-
-  const mojibakePrefixes = text.match(/[ÃÂ](?=[\u0080-\u00BF])|â(?=[€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ])/gu)?.length ?? 0
-  return mojibakePrefixes >= 2 && mojibakePrefixes / Math.max(1, nonWhitespace.length) > MAX_MOJIBAKE_PREFIX_RATIO
 }
 
 function normalizedAngle(degrees: number): number {

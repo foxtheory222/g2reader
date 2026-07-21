@@ -10,6 +10,7 @@ describe('book store', () => {
     expect(await stableBookId('same text')).not.toBe(await stableBookId('different text'))
     expect(await stableBookId('same text')).toMatch(/^book-[0-9a-f]{64}$/)
     expect(titleFromFilename('/downloads/field-notes.txt')).toBe('field-notes')
+    expect(titleFromFilename('/downloads/field-notes.epub')).toBe('field-notes')
 
     const store = createBookStore({ indexedDB: null, clock: () => 1234 })
     const imported = await store.importText('field-notes.txt', 'same text')
